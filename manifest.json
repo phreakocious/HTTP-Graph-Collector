@@ -1,7 +1,7 @@
 {
    "manifest_version" : 2,
    "name" : "HTTP Graph Collector",
-   "version" : "0.1",
+   "version" : "0.2",
    "description" : "Accompanies the HTTP Graph plugin for Gephi.  Collects minimal HTTP and HTTPS header data and POSTs to a REST API as you browse.",
    "permissions" : [
       "http://*/*",
