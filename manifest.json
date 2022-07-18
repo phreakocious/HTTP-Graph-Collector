@@ -6,8 +6,7 @@
    "permissions" : [
       "http://*/*",
       "https://*/*",
-      "webRequest",
-      "webRequestBlocking"
+      "webRequest"
    ],
    "background" : {
       "persistent" : true,

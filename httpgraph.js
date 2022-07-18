@@ -10,6 +10,7 @@
 var url_backend = "http://127.0.0.1:65444/add_record"  // data will POST to here
 var requests = []  // stores references to requests until their responses arrive
 
+// is this XHR reusing the socket for multiple requests?
 function sendLog(message, callback) {
 	//console.log(message)
 	var xhr = new XMLHttpRequest()
