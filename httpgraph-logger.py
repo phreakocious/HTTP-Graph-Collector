@@ -26,8 +26,9 @@ hour_mark = "⁑"
 
 print_styles = {
     "2xx":                Fore.CYAN + Style.NORMAL + Back.BLACK,
+    "3xx":       Fore.LIGHTWHITE_EX + Style.NORMAL + Back.BLACK,
     "4xx":     Fore.LIGHTMAGENTA_EX + Style.BRIGHT + Back.BLUE,
-    "5xx":         Fore.LIGHTRED_EX + Style.BRIGHT + Back.WHITE,
+    "5xx":         Fore.LIGHTRED_EX + Style.BRIGHT + Back.BLACK,
     "other":    Fore.LIGHTYELLOW_EX + Style.BRIGHT + Back.GREEN,
     "hour_mark": Fore.LIGHTWHITE_EX + Style.BRIGHT + Back.BLACK
 }
@@ -47,6 +48,8 @@ class Server(BaseHTTPRequestHandler):
         status = "other"
         if response_code in range(200, 300):
             status = "2xx"
+        if response_code in range(300, 400):
+            status = "3xx"
         elif response_code in range(400, 500):
             status = "4xx"
         elif response_code in range(500, 600):
@@ -113,7 +116,7 @@ if __name__ == "__main__":
         file.seek(0, 2)
         file_size = file.tell()
 
-    print("started %s .. listening on %s:%i" %
+    print("started at %s .. listening on %s:%i" %
           (datetime.now(), hostname, listen_port))
 
     print("appending to '%s' (%i entries, %i bytes)" %
@@ -135,3 +138,4 @@ if __name__ == "__main__":
         pass
 
     http_server.server_close()
+    print("")
