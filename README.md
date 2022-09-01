@@ -4,6 +4,6 @@ This is the source code for a [Chrome extension](https://chrome.google.com/webst
 
 It sends POSTs to http://localhost:65444/add_record with information from the HTTP headers of requests made by Chrome.
 
-There is also [httpgraph-logger.py](httpgraph-logger.py), a Python console app which can receive the data in lieu of the Gephi plugin.  It will append to a .json file which can be imported later or analyzed with other tools like `jq`.  It also prints sparklines to the console so you can visualize how many requests are being made:
+There is also [httpgraph-logger.py](httpgraph-logger.py), a Python console app which can receive the data in lieu of the Gephi plugin.  It will append to a .json file which can be imported later into Gephi using [httpgraph-loader.py](httpgraph-loader.py) or analyzed with other tools like `jq`.  It also prints sparklines to the console so you can visualize how many requests are being made:
 
 ![sample of httpgraph-logger.py output](https://github.com/phreakocious/HTTP-Graph-Collector/blob/master/httpgraph-logger_screenshot.png?raw=true)
