@@ -95,13 +95,6 @@ class SparksPrinter(Thread):
 
             time.sleep(poll_secs)
 
-# meh
-class InputHider(Thread):
-    def run(self):
-        getpass("")
-        while True:
-            input()
-
 
 if __name__ == "__main__":
     init(autoreset=True)
@@ -119,18 +112,16 @@ if __name__ == "__main__":
     print("started at %s .. listening on %s:%i" %
           (datetime.now(), hostname, listen_port))
 
-    print("appending to '%s' (%i entries, %i bytes)" %
-          (output_file, file_lines, file_size))
+    print("appending to '%s' (%s entries, %s bytes)" %
+          (output_file, "{:,d}".format(file_lines), "{:,d}".format(file_size)))
 
     print("sparks range %i-%i .. %i second polling .. hour mark: %s" %
           (spark_min, spark_max, poll_secs, hour_mark))
 
     http_server = ThreadingHTTPServer((hostname, listen_port), Server)
     sparks_printer = SparksPrinter(daemon=True)
-    input_hider = InputHider(daemon=True)
 
     try:
-        # input_hider.start()
         sparks_printer.start()
         http_server.serve_forever()
         # keep the main thread busy and don't echo user input
