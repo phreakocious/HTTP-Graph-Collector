@@ -14,12 +14,16 @@ import time
 import itertools
 from urllib import request
 from tqdm import tqdm
+from argparse import ArgumentParser
 
 batch_size = 500
-file = "httpgraph-requests.json"
 url = "http://localhost:65444/add_record"
 
-with open(file, "r", encoding="utf-8") as f:
+parser = ArgumentParser()
+parser.add_argument("filename", nargs="?", default="httpgraph-requests.json")
+args = parser.parse_args()
+
+with open(args.filename, "r", encoding="utf-8") as f:
     pbar = tqdm(total=len(f.readlines()), unit=" URLs")
     f.seek(0)
 
