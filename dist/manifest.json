@@ -1,26 +1,40 @@
 {
-   "manifest_version" : 2,
-   "name" : "HTTP Graph Collector",
-   "version" : "0.3",
-   "description" : "Accompanies the HTTP Graph plugin for Gephi.  Collects minimal HTTP and HTTPS header data and POSTs to a REST API as you browse.",
-   "permissions" : [
-      "http://*/*",
-      "https://*/*",
-      "webRequest",
-      "storage"
-   ],
-   "background" : {
-      "persistent" : true,
-      "scripts" : [
-         "httpgraph.js"
-      ]
-   },
-   "icons": {
-     "48": "httpgraph-48x48.png",
-     "128": "httpgraph-128x128.png"
-   },
-   "options_ui": {
-     "page": "options/options.html",
-     "open_in_tab": false
-  }
+    "manifest_version": 3,
+    "name": "HTTP Graph Collector",
+    "version": "0.4",
+    "description": "Accompanies the HTTP Graph plugin for Gephi. Collects minimal HTTP and HTTPS header data and POSTs to a REST API as you browse.",
+    "background":
+    {
+        "service_worker": "httpgraph.js"
+    },
+    "permissions":
+    [
+        "storage",
+        "webRequest",
+        "tabs"
+    ],
+    "host_permissions":
+    [
+        "http://*/*",
+        "https://*/*",
+        "http://127.0.0.1/*"
+    ],
+    "action":
+    {
+        "default_title": "HTTP Graph Collector",
+        "default_icon":
+        {
+            "48": "httpgraph-48x48.png"
+        }
+    },
+    "icons":
+    {
+        "48": "httpgraph-48x48.png",
+        "128": "httpgraph-128x128.png"
+    },
+    "options_ui":
+    {
+        "page": "options/options.html",
+        "open_in_tab": false
+    }
 }
