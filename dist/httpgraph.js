@@ -16,6 +16,22 @@ const default_domain_exclude = "";
 // Request timing map — stores start times keyed by requestId
 const requestTimings = new Map();
 
+// Initiator map — stores the origin that triggered each request
+const requestInitiators = new Map();
+
+// Connected viewer ports for live streaming
+const viewerPorts = new Set();
+
+function broadcastToViewers(data) {
+    for (const port of viewerPorts) {
+        try {
+            port.postMessage(data);
+        } catch (e) {
+            viewerPorts.delete(port);
+        }
+    }
+}
+
 // hashing function courtesy of bryc https://github.com/bryc/code/blob/master/jshash/experimental/cyrb53.js
 const cyrb53 = (str, seed = 42) => {
     let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;
@@ -96,6 +112,13 @@ async function logResponse(details) {
         requestTimings.delete(details.requestId);
     }
 
+    // Attach initiator origin if captured from onBeforeRequest
+    const initiator = requestInitiators.get(details.requestId);
+    if (initiator) {
+        data.initiator = initiator;
+        requestInitiators.delete(details.requestId);
+    }
+
 	for (const header of headers) {
         const headerName = header.name.toLowerCase();
 		if (headerName === 'content-length') {
@@ -137,12 +160,19 @@ async function logResponse(details) {
     } catch (error) {
         console.error("HTTP Graph Error: Could not send data to backend.", error);
     }
+
+    broadcastToViewers(finalData);
 }
 
 const requestFilter = { urls: [ "http://*/*", "https://*/*" ] };
 
 chrome.webRequest.onBeforeRequest.addListener(
-	(details) => { requestTimings.set(details.requestId, details.timeStamp); },
+	(details) => {
+		requestTimings.set(details.requestId, details.timeStamp);
+		if (details.initiator && details.initiator !== "null") {
+			requestInitiators.set(details.requestId, details.initiator);
+		}
+	},
 	requestFilter
 );
 
@@ -152,8 +182,67 @@ chrome.webRequest.onCompleted.addListener(
 	[ "responseHeaders" ]
 );
 
+chrome.webRequest.onBeforeRedirect.addListener(
+	async (details) => {
+		const items = await chrome.storage.local.get({
+			rest_port: default_rest_port,
+			collecting: default_collecting,
+			domain_include: default_domain_include,
+			domain_exclude: default_domain_exclude
+		});
+
+		if (!items.collecting) return;
+
+		const url_backend = `http://127.0.0.1:${items.rest_port}/add_record`;
+		if (details.url.startsWith(url_backend) || details.tabId < 0) return;
+
+		// Domain filtering on the source URL
+		try {
+			const hostname = new URL(details.url).hostname;
+			const includeList = items.domain_include.split("\n").map(s => s.trim().toLowerCase()).filter(Boolean);
+			const excludeList = items.domain_exclude.split("\n").map(s => s.trim().toLowerCase()).filter(Boolean);
+
+			if (includeList.length > 0) {
+				if (!domainMatches(hostname.toLowerCase(), includeList)) return;
+			} else if (excludeList.length > 0) {
+				if (domainMatches(hostname.toLowerCase(), excludeList)) return;
+			}
+		} catch (_e) {
+			// If URL parsing fails, proceed anyway
+		}
+
+		const data = {
+			edge_type: "redirect",
+			url: details.url,
+			redirect_url: details.redirectUrl,
+			ts: details.timeStamp,
+			ip: details.ip,
+			method: details.method,
+			status: details.statusCode,
+			type: details.type
+		};
+
+		try {
+			await fetch(url_backend, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(data) + "\r\n"
+			});
+		} catch (error) {
+			console.error("HTTP Graph Error: Could not send redirect data to backend.", error);
+		}
+
+		broadcastToViewers(data);
+	},
+	requestFilter,
+	[ "responseHeaders" ]
+);
+
 chrome.webRequest.onErrorOccurred.addListener(
-	(details) => { requestTimings.delete(details.requestId); },
+	(details) => {
+		requestTimings.delete(details.requestId);
+		requestInitiators.delete(details.requestId);
+	},
 	requestFilter
 );
 
@@ -171,4 +260,15 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onStartup.addListener(async () => {
 	const items = await chrome.storage.local.get({ collecting: default_collecting });
 	updateBadge(items.collecting);
+});
+
+// ── Live Viewer Streaming ──
+chrome.runtime.onConnectExternal.addListener((port) => {
+	if (port.name !== "httpgraph-viewer") return;
+	console.log("HTTP Graph: Viewer connected");
+	viewerPorts.add(port);
+	port.onDisconnect.addListener(() => {
+		viewerPorts.delete(port);
+		console.log("HTTP Graph: Viewer disconnected");
+	});
 });

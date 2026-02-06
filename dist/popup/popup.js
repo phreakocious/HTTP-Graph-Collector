@@ -62,7 +62,17 @@ function saveOptions() {
   });
 }
 
-document.addEventListener('DOMContentLoaded', restoreOptions);
+document.addEventListener('DOMContentLoaded', function() {
+  restoreOptions();
+  const extIdEl = document.getElementById('ext-id');
+  extIdEl.textContent = chrome.runtime.id;
+  extIdEl.addEventListener('click', function() {
+    navigator.clipboard.writeText(chrome.runtime.id).then(function() {
+      extIdEl.textContent = 'Copied!';
+      setTimeout(function() { extIdEl.textContent = chrome.runtime.id; }, 1200);
+    });
+  });
+});
 document.getElementById('toggle-row').addEventListener('click', toggleCollecting);
 document.getElementById('save').addEventListener('click', saveOptions);
 document.getElementById('rest_port').addEventListener('input', function(e) {

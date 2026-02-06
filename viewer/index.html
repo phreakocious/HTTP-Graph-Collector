@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HTTP Graph Viewer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="sidebar">
+    <h1>HTTP Graph Viewer</h1>
+
+    <section>
+      <label class="file-btn">
+        Load GEXF <input type="file" id="file-input" accept=".gexf">
+      </label>
+      <span id="graph-stats"></span>
+    </section>
+
+    <section id="live-section">
+      <h2>Live</h2>
+      <p class="hint">Stream requests in real time from the <a href="https://chromewebstore.google.com/detail/http-graph-collector/lkkdeokncfjlinldgikoabgknklnnkoe" target="_blank">HTTP Graph Collector</a> extension. Install it, then open its popup and click the extension ID to copy it. All data stays local to your browser.</p>
+      <input type="text" id="ext-id" placeholder="Extension ID">
+      <div class="btn-group">
+        <button id="btn-live">Connect</button>
+      </div>
+      <span id="live-status"></span>
+    </section>
+
+    <section id="layout-section" class="hidden">
+      <h2>Layout</h2>
+      <div class="btn-group">
+        <button id="btn-fa2">Start ForceAtlas2</button>
+        <button id="btn-circular">Circular</button>
+        <button id="btn-hierarchical">Hierarchical</button>
+      </div>
+      <div id="fa2-settings" class="hidden">
+        <div class="setting-row">
+          <label>Repulsion <span id="fa2-scaling-val"></span></label>
+          <input type="range" id="fa2-scaling" min="1" max="500" step="1">
+        </div>
+        <div class="setting-row">
+          <label>Gravity <span id="fa2-gravity-val"></span></label>
+          <input type="range" id="fa2-gravity" min="1" max="500" step="1">
+        </div>
+        <div class="setting-row">
+          <label>Slow Down <span id="fa2-slowdown-val"></span></label>
+          <input type="range" id="fa2-slowdown" min="1" max="100" step="1">
+        </div>
+        <div class="setting-row">
+          <label>BH Theta <span id="fa2-theta-val"></span></label>
+          <input type="range" id="fa2-theta" min="1" max="30" step="1">
+        </div>
+        <div class="setting-row">
+          <label>Iter/tick <span id="fa2-iters-val"></span></label>
+          <input type="range" id="fa2-iters" min="1" max="50" step="1">
+        </div>
+        <div class="setting-checks">
+          <label><input type="checkbox" id="fa2-barneshut" checked> Barnes-Hut</label>
+          <label><input type="checkbox" id="fa2-stronggrav"> Strong Gravity</label>
+          <label><input type="checkbox" id="fa2-linlog"> LinLog</label>
+        </div>
+        <span id="fa2-mode" class="fa2-mode-label"></span>
+      </div>
+    </section>
+
+    <section id="size-section" class="hidden">
+      <h2>Node Size</h2>
+      <div class="btn-group">
+        <button id="btn-size-default" class="active">Default</button>
+        <button id="btn-size-visited">Visited</button>
+        <button id="btn-size-visited-log">Visited (log)</button>
+      </div>
+      <div id="size-range" class="hidden">
+        <div class="setting-row">
+          <label>Min <span id="size-min-val">2</span> / Max <span id="size-max-val">20</span></label>
+          <input type="range" id="size-min" min="1" max="10" value="2" step="0.5">
+          <input type="range" id="size-max" min="5" max="50" value="20" step="1">
+        </div>
+      </div>
+    </section>
+
+    <section id="search-section" class="hidden">
+      <h2>Search</h2>
+      <input type="text" id="search-input" list="node-list" placeholder="Search nodes...">
+      <datalist id="node-list"></datalist>
+    </section>
+
+    <section id="focus-section" class="hidden">
+      <h2>Focus</h2>
+      <div class="focus-controls">
+        <label>Hops: <span id="hop-value">2</span></label>
+        <input type="range" id="hop-slider" min="1" max="5" value="2">
+        <button id="btn-focus">Focus on selected</button>
+      </div>
+    </section>
+
+    <section id="filter-section" class="hidden">
+      <h2>Filter by Type</h2>
+      <div id="type-filters"></div>
+      <h2>Filter by Domain</h2>
+      <input type="text" id="domain-filter" placeholder="Filter domains...">
+      <div id="domain-filters"></div>
+      <button id="btn-reset">Reset Filters</button>
+      <label id="show-hidden-label" class="hidden"><input type="checkbox" id="show-hidden"> Show hidden nodes (<span id="hidden-count">0</span>)</label>
+    </section>
+
+    <section id="info-panel" class="hidden">
+      <h2>Node Info</h2>
+      <div id="info-content"></div>
+    </section>
+  </div>
+
+  <div id="graph-container"></div>
+  <div id="tooltip" class="hidden"></div>
+  <div id="context-menu" class="hidden"></div>
+
+  <script src="https://unpkg.com/graphology@0.25.4/dist/graphology.umd.min.js"></script>
+  <script src="https://unpkg.com/sigma@3.0.2/dist/sigma.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/graphology-library@0.8.0/dist/graphology-library.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

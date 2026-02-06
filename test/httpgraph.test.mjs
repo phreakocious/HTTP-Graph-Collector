@@ -18,6 +18,7 @@ function loadModule() {
     console,
     Math,
     Map,
+    Set,
     URL,
     fetch: () => {},
     setTimeout: () => {},
@@ -27,12 +28,14 @@ function loadModule() {
       tabs: { get: (_id, cb) => cb(null) },
       webRequest: {
         onBeforeRequest: { addListener: () => {} },
+        onBeforeRedirect: { addListener: () => {} },
         onCompleted: { addListener: () => {} },
         onErrorOccurred: { addListener: () => {} },
       },
       runtime: {
         onInstalled: { addListener: () => {} },
         onStartup: { addListener: () => {} },
+        onConnectExternal: { addListener: () => {} },
       },
     },
   });

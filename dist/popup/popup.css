@@ -276,9 +276,23 @@ textarea::placeholder {
 
 /* Footer */
 .footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 6px 14px;
-  text-align: right;
   border-top: 1px solid var(--border);
+}
+
+.ext-id {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.ext-id:hover {
+  color: var(--blue);
 }
 
 .footer a {
