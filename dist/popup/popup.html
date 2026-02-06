@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>HTTP Graph Collector</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="header">
+    <h1>HTTP Graph Collector</h1>
+    <span class="version">v0.5</span>
+  </div>
+
+  <div class="toggle-row" id="toggle-row">
+    <div class="toggle-label">
+      <div class="status-dot" id="status-dot"></div>
+      <span class="status-text" id="status-text">Collecting</span>
+    </div>
+    <div class="toggle-switch active" id="toggle-switch"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Settings</div>
+    <div class="field">
+      <label for="rest_port">REST Port</label>
+      <input type="number" id="rest_port" min="1" max="65535" value="65444" />
+      <div class="url-preview">POST to http://127.0.0.1:<span id="url_port">65444</span>/add_record</div>
+    </div>
+    <div class="field">
+      <label class="checkbox-row">
+        <input type="checkbox" id="scrub_parameters" />
+        <span>Scrub URL parameters</span>
+      </label>
+      <div class="hint">Hashes everything after '?' in URLs to reduce exposure of sensitive query parameters. Does not affect graph accuracy.</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Domain Filtering</div>
+    <div class="field">
+      <label for="domain_include">Only collect from these domains</label>
+      <textarea id="domain_include" rows="2" placeholder="example.com&#10;another.org"></textarea>
+    </div>
+    <div class="field">
+      <label for="domain_exclude">Never collect from these domains</label>
+      <textarea id="domain_exclude" rows="2" placeholder="ads.example.com&#10;tracker.net"></textarea>
+    </div>
+    <div class="hint">One domain per line. If the include list is non-empty, only matching domains are collected and the exclude list is ignored.</div>
+  </div>
+
+  <div class="section">
+    <button class="save-btn" id="save">Save Settings</button>
+    <div class="status-msg" id="status-msg"></div>
+  </div>
+
+  <div class="footer">
+    <span class="ext-id" id="ext-id" title="Click to copy"></span>
+    <a href="https://linktr.ee/phreakocious" target="_blank">@phreakocious</a>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

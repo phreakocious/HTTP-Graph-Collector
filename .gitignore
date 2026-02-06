@@ -4,3 +4,5 @@
 *.pem
 *.sublime-*
 *.json
+node_modules/
+.venv/
