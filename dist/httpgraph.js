@@ -29,7 +29,7 @@ const cyrb53 = (str, seed = 42) => {
     return 4294967296 * (2097151 & h2) + (h1 >>> 0);
 };
 
-function scrubber(match, p1, offset, string) {
+function scrubber(match, p1, _offset, _string) {
 	return "?SCRUBBED_hash=" + cyrb53(p1);
 }
 
@@ -75,7 +75,7 @@ async function logResponse(details) {
         } else if (excludeList.length > 0) {
             if (domainMatches(hostname.toLowerCase(), excludeList)) return;
         }
-    } catch (e) {
+    } catch (_e) {
         // If URL parsing fails, proceed anyway
     }
 
