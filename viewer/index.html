@@ -11,9 +11,12 @@
     <h1>HTTP Graph Viewer</h1>
 
     <section>
-      <label class="file-btn">
-        Load GEXF <input type="file" id="file-input" accept=".gexf">
-      </label>
+      <div class="btn-group">
+        <label class="file-btn">
+          Load GEXF <input type="file" id="file-input" accept=".gexf">
+        </label>
+        <button id="btn-export" class="hidden">Export GEXF</button>
+      </div>
       <span id="graph-stats"></span>
     </section>
 

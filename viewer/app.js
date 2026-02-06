@@ -221,6 +221,7 @@
 
   // ── DOM refs ───────────────────────────────────────────────────────
   const fileInput = document.getElementById("file-input");
+  const btnExport = document.getElementById("btn-export");
   const graphStats = document.getElementById("graph-stats");
   const layoutSection = document.getElementById("layout-section");
   const btnFA2 = document.getElementById("btn-fa2");
@@ -293,6 +294,18 @@
     reader.readAsText(file);
   });
 
+  btnExport.addEventListener("click", function () {
+    if (!graph) return;
+    var gexfString = graphologyLibrary.gexf.write(graph);
+    var blob = new Blob([gexfString], { type: "application/xml" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "httpgraph.gexf";
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
   function initRenderer(opts) {
     opts = opts || {};
     if (renderer) { renderer.kill(); renderer = null; }
@@ -322,6 +335,7 @@
         defaultDrawNodeHover: drawNodeHover,
       });
 
+      btnExport.classList.remove("hidden");
       layoutSection.classList.remove("hidden");
       document.getElementById("size-section").classList.remove("hidden");
       searchSection.classList.remove("hidden");
