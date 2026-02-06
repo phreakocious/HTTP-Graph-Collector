@@ -9,6 +9,12 @@
 
 const default_rest_port = "65444";
 const default_scrub_parameters = false;
+const default_collecting = true;
+const default_domain_include = "";
+const default_domain_exclude = "";
+
+// Request timing map — stores start times keyed by requestId
+const requestTimings = new Map();
 
 // hashing function courtesy of bryc https://github.com/bryc/code/blob/master/jshash/experimental/cyrb53.js
 const cyrb53 = (str, seed = 42) => {
@@ -27,17 +33,51 @@ function scrubber(match, p1, offset, string) {
 	return "?SCRUBBED_hash=" + cyrb53(p1);
 }
 
+function updateBadge(collecting) {
+	if (collecting) {
+		chrome.action.setBadgeText({ text: "" });
+	} else {
+		chrome.action.setBadgeText({ text: "OFF" });
+		chrome.action.setBadgeBackgroundColor({ color: "#cc0000" });
+	}
+}
+
+function domainMatches(hostname, domainList) {
+	return domainList.some(domain => hostname === domain || hostname.endsWith("." + domain));
+}
+
 async function logResponse(details) {
     // Get settings from storage every time, as the service worker can be terminated.
     const items = await chrome.storage.local.get({
         rest_port: default_rest_port,
-        scrub_parameters: default_scrub_parameters
+        scrub_parameters: default_scrub_parameters,
+        collecting: default_collecting,
+        domain_include: default_domain_include,
+        domain_exclude: default_domain_exclude
     });
+
+    // If collection is paused, do nothing
+    if (!items.collecting) return;
 
     const url_backend = `http://127.0.0.1:${items.rest_port}/add_record`;
 
     // Avoid feedback loop and internal browser requests
  	if ( details.url.startsWith(url_backend) || details.tabId < 0 ) return;
+
+    // Domain filtering
+    try {
+        const hostname = new URL(details.url).hostname;
+        const includeList = items.domain_include.split("\n").map(s => s.trim().toLowerCase()).filter(Boolean);
+        const excludeList = items.domain_exclude.split("\n").map(s => s.trim().toLowerCase()).filter(Boolean);
+
+        if (includeList.length > 0) {
+            if (!domainMatches(hostname.toLowerCase(), includeList)) return;
+        } else if (excludeList.length > 0) {
+            if (domainMatches(hostname.toLowerCase(), excludeList)) return;
+        }
+    } catch (e) {
+        // If URL parsing fails, proceed anyway
+    }
 
 	const headers = details.responseHeaders;
 	let data = {
@@ -48,6 +88,13 @@ async function logResponse(details) {
 	  status: details.statusCode,
 	  type: details.type
 	};
+
+    // Compute request duration if we have a start time
+    const startTime = requestTimings.get(details.requestId);
+    if (startTime !== undefined) {
+        data.duration_ms = Math.round(details.timeStamp - startTime);
+        requestTimings.delete(details.requestId);
+    }
 
 	for (const header of headers) {
         const headerName = header.name.toLowerCase();
@@ -92,15 +139,36 @@ async function logResponse(details) {
     }
 }
 
+const requestFilter = { urls: [ "http://*/*", "https://*/*" ] };
+
+chrome.webRequest.onBeforeRequest.addListener(
+	(details) => { requestTimings.set(details.requestId, details.timeStamp); },
+	requestFilter
+);
+
 chrome.webRequest.onCompleted.addListener(
 	logResponse,
-	{ urls: [ "http://*/*", "https://*/*" ] },
+	requestFilter,
 	[ "responseHeaders" ]
+);
+
+chrome.webRequest.onErrorOccurred.addListener(
+	(details) => { requestTimings.delete(details.requestId); },
+	requestFilter
 );
 
 chrome.runtime.onInstalled.addListener(() => {
 	chrome.storage.local.set({
 		rest_port: default_rest_port,
-		scrub_parameters: default_scrub_parameters
+		scrub_parameters: default_scrub_parameters,
+		collecting: default_collecting,
+		domain_include: default_domain_include,
+		domain_exclude: default_domain_exclude
 	});
+	updateBadge(default_collecting);
+});
+
+chrome.runtime.onStartup.addListener(async () => {
+	const items = await chrome.storage.local.get({ collecting: default_collecting });
+	updateBadge(items.collecting);
 });

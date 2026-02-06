@@ -21,7 +21,19 @@
   </p>
   <p>
     (JSON data will POST to: http://127.0.0.1:<b><span id=url_port>65444</span></b>/add_record)
-    <br />
+  </p>
+  <hr />
+  <p>
+    <label for="domain_include"><b>Only collect from these domains</b> (one per line):</label><br />
+    <textarea id="domain_include" rows="4" cols="40" placeholder="example.com&#10;another.org"></textarea>
+  </p>
+  <p>
+    <label for="domain_exclude"><b>Never collect from these domains</b> (one per line):</label><br />
+    <textarea id="domain_exclude" rows="4" cols="40" placeholder="ads.example.com&#10;tracker.net"></textarea>
+  </p>
+  <p><small>If the include list is non-empty, only matching domains are collected and the exclude list is ignored.</small></p>
+  <hr />
+  <p>
     <div id="status">&nbsp;</div>
   </p>
   <p style="float: left;"><button id="save">Save</button></p>
