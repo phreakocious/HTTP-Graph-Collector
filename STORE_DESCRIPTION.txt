@@ -1,0 +1,41 @@
+HTTP Graph Collector builds a live, interactive graph of web relationships as you browse. Watch domains, hosts, and resources connect in real time — see how sites load dependencies, where redirects go, and which third parties are involved.
+
+Live Viewer
+
+Open the graph viewer at nullphase.net/hg, paste your extension ID (click it in the popup to copy), and hit Connect. Every HTTP request you make instantly appears as a node in the graph. Domains are automatically colored, and the force-directed layout organizes the structure as it grows. All data stays local to your browser — the viewer page talks directly to the extension through Chrome's messaging API. Nothing is sent over the network.
+
+Viewer Features
+
+• ForceAtlas2 force-directed layout with adjustable repulsion, gravity, and Barnes-Hut optimization (runs in a web worker for large graphs)
+• Circular and hierarchical layout options
+• Search with autocomplete — camera flies to matching nodes
+• Focus mode — isolate any node's N-hop neighborhood
+• Filter by node type (client, domain, host, resource) or by domain
+• Right-click nodes to hide them or their neighbors
+• Size nodes by visit count (linear or logarithmic scale)
+• Hover for tooltips, click for full attribute detail
+• Export your graph as GEXF for use in Gephi or other tools
+• Handles large graphs — tested with 300K+ nodes
+
+GEXF File Loading
+
+Already have a GEXF file? Load it directly into the viewer without the extension. The viewer preserves colors, sizes, and all node attributes from the file.
+
+REST API Mode
+
+The extension also POSTs JSON request records to a configurable localhost REST API (default port 65444), compatible with the original HTTP Graph plugin for Gephi and the included Python graph builder. Use httpgraph-logger.py to collect records and httpgraph-builder.py to generate GEXF files for offline analysis.
+
+Collection Controls
+
+• Pause and resume collection with one click
+• Domain include/exclude lists to focus on specific sites or filter out noise
+• URL parameter scrubbing to reduce exposure of sensitive query strings
+• Request timing (duration in milliseconds)
+
+Privacy
+
+This extension collects HTTP request metadata (URLs, status codes, content types, timing) from your browsing. In live viewer mode, this data is passed directly to the viewer tab within your browser — it never touches a remote server. In REST API mode, data is sent only to localhost. The extension requires broad host permissions to observe requests across all sites, but no data is collected when paused, and domain filtering lets you limit the scope.
+
+Graph Structure
+
+Each browsed page creates a hierarchy of nodes: client → domain → host → resource, with edges representing the relationships between them. Initiator and referer data connect cross-origin dependencies. Redirects create resource-to-resource edges. Each domain gets a unique color from a 41-color palette, making clusters visually distinct.
