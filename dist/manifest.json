@@ -2,7 +2,7 @@
     "manifest_version": 3,
     "name": "HTTP Graph Collector",
     "version": "0.6",
-    "description": "Collects HTTP/HTTPS request metadata as you browse and streams it live to the HTTP Graph Viewer at nullphase.net/hg or POSTs to a localhost REST API. All data stays local to your browser — nothing is sent over the network.",
+    "description": "Builds a graph from your HTTP traffic. View live at nullphase.net/hg or POST to a localhost REST API. All data stays local.",
     "background":
     {
         "service_worker": "httpgraph.js"
