@@ -26,7 +26,7 @@ function broadcastToViewers(data) {
     for (const port of viewerPorts) {
         try {
             port.postMessage(data);
-        } catch (e) {
+        } catch (_e) {
             viewerPorts.delete(port);
         }
     }
