@@ -234,7 +234,7 @@ input[type="checkbox"] { accent-color: var(--accent-cyan); }
   pointer-events: none;
   z-index: 10;
   max-width: 340px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  box-shadow: 0 4px 12px rgba(13, 2, 33, 0.8);
 }
 #tooltip .tt-label { font-weight: 600; color: var(--accent-pink); margin-bottom: 3px; }
 #tooltip .tt-row { color: var(--text-secondary); }
@@ -250,7 +250,7 @@ input[type="checkbox"] { accent-color: var(--accent-cyan); }
   font-size: 13px;
   z-index: 20;
   min-width: 160px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  box-shadow: 0 4px 12px rgba(13, 2, 33, 0.8);
 }
 #context-menu .menu-item {
   padding: 6px 14px;
