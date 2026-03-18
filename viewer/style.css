@@ -222,6 +222,29 @@ input[type="checkbox"] { accent-color: var(--accent-cyan); }
   background: var(--bg-page);
 }
 
+#graph-container::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(185, 103, 255, 0.07) 0px,
+      transparent 1px,
+      transparent 60px
+    ),
+    repeating-linear-gradient(
+      0deg,
+      rgba(185, 103, 255, 0.07) 0px,
+      transparent 1px,
+      transparent 60px
+    );
+  transform-origin: center bottom;
+  transform: perspective(400px) rotateX(45deg);
+  z-index: 0;
+  pointer-events: none;
+}
+
 /* Tooltip */
 #tooltip {
   position: absolute;
