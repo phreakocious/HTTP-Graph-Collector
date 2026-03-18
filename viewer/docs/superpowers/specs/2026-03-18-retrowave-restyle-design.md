@@ -6,9 +6,22 @@ Restyle the HTTP Graph Viewer from its current GitHub-dark aesthetic to a retrow
 
 ## Fonts
 
-- **Headings** (`h1`, `h2`): Michroma (Google Fonts)
-- **Body/UI** (everything else): Oxanium (Google Fonts)
-- Loaded via `<link>` in index.html `<head>`
+- **Headings** (`h1`, `h2`): `font-family: 'Michroma', sans-serif`
+- **Body/UI** (everything else): `font-family: 'Oxanium', sans-serif`
+- Google Fonts link in index.html `<head>`:
+  ```html
+  <link href="https://fonts.googleapis.com/css2?family=Michroma&family=Oxanium:wght@400;600&display=swap" rel="stylesheet">
+  ```
+
+## Variable Migration
+
+Old CSS variables are removed and replaced:
+
+| Old variable | New variable | Context |
+|---|---|---|
+| `--blue` | `--accent-pink` (links, labels) / `--accent-cyan` (active states, ranges) | Context-dependent split |
+| `--blue-hover` | `--accent-pink-hover` | File button hover |
+| `--green` | `--accent-mint` | Connected status |
 
 ## Color Palette
 
@@ -40,10 +53,10 @@ All interactive elements (buttons, inputs, file-btn) use thin neon-colored borde
 ### Buttons
 - Default: `--bg-input` background, `--border` border (1px solid)
 - Hover: `--bg-hover` background, border color shifts to `--accent-pink`, subtle `box-shadow: 0 0 8px var(--accent-pink)`
-- Active (`.active`): `--accent-cyan` border, `box-shadow: 0 0 8px var(--accent-cyan)`, text color `--accent-cyan`
+- Active (`.active`): `--accent-cyan` border, `box-shadow: 0 0 8px var(--accent-cyan)`, text color `--accent-cyan`, subtle tinted background `rgba(1, 205, 254, 0.1)` for visual distinction in button groups
 
 ### File button (`.file-btn`)
-- Default: `--bg-input` background, `--accent-pink` border
+- Default: `--bg-input` background, `--accent-pink` border, `color: var(--accent-pink)`
 - Hover: `box-shadow: 0 0 10px var(--accent-pink)`
 
 ### Text inputs
@@ -84,10 +97,17 @@ CSS-only approach using a `::before` pseudo-element on `#graph-container`:
 }
 ```
 
-- Sits behind the sigma canvas (which has its own z-index via absolute positioning)
+- Sits behind the sigma canvas — child elements naturally stack above `::before` pseudo-elements in the same stacking context, so sigma's canvases will layer on top without explicit z-index
 - Faint violet lines (`rgba(185, 103, 255, 0.07)`) — visible but not distracting
 - `pointer-events: none` so it doesn't interfere with sigma interaction
-- The sigma `<canvas>` element will need `position: relative; z-index: 1` to layer above the grid
+- Contingency: if grid renders on top, add `#graph-container > canvas { position: relative; z-index: 1; }`
+
+## Element-Specific Color Mapping
+
+- `#sidebar h2`: `color: var(--accent-violet)` (was `--text-muted`)
+- `.setting-row label span` (slider values): `color: var(--accent-cyan)` (was `--blue`)
+- `.hint a`, `#sidebar a`: `color: var(--accent-pink)` (was `--blue`)
+- Link hover: `color: var(--accent-pink-hover)` + `text-decoration: underline`
 
 ## Sidebar Styling
 
@@ -99,7 +119,7 @@ CSS-only approach using a `::before` pseudo-element on `#graph-container`:
 - Background: `--bg-card`
 - Border: `--border`
 - `.tt-label` color: `--accent-pink` (was `--blue`)
-- Box-shadow: `0 4px 12px rgba(13, 2, 33, 0.8)` (deep purple shadow)
+- Box-shadow (both tooltip and context menu): `0 4px 12px rgba(13, 2, 33, 0.8)` (deep purple shadow)
 
 ## Links
 
