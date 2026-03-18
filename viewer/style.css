@@ -55,7 +55,7 @@ body {
   font-family: 'Michroma', sans-serif;
   font-size: 11px;
   font-weight: 600;
-  color: var(--text-muted);
+  color: var(--accent-violet);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-bottom: 6px;
@@ -75,6 +75,7 @@ section { display: flex; flex-direction: column; gap: 6px; }
 }
 
 .hint a:hover, #sidebar a:hover {
+  color: var(--accent-pink-hover);
   text-decoration: underline;
 }
 
@@ -86,14 +87,18 @@ section { display: flex; flex-direction: column; gap: 6px; }
   padding: 8px 14px;
   background: var(--bg-input);
   color: var(--accent-pink);
+  border: 1px solid var(--accent-pink);
   border-radius: 6px;
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;
   text-align: center;
-  transition: background-color 0.15s;
+  transition: background-color 0.15s, box-shadow 0.15s;
 }
-.file-btn:hover { background: var(--bg-hover); }
+.file-btn:hover {
+  background: var(--bg-hover);
+  box-shadow: 0 0 10px var(--accent-pink);
+}
 .file-btn input { display: none; }
 
 /* Live connection */
@@ -113,10 +118,19 @@ button {
   border-radius: 6px;
   cursor: pointer;
   font-size: 12px;
-  transition: background-color 0.15s;
+  transition: background-color 0.15s, box-shadow 0.15s, border-color 0.15s;
 }
-button:hover { background: var(--bg-hover); }
-button.active { background: rgba(1, 205, 254, 0.1); border-color: var(--accent-cyan); }
+button:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent-pink);
+  box-shadow: 0 0 8px var(--accent-pink);
+}
+button.active {
+  background: rgba(1, 205, 254, 0.1);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  box-shadow: 0 0 8px var(--accent-cyan);
+}
 
 .btn-group { display: flex; gap: 4px; flex-wrap: wrap; }
 
@@ -139,9 +153,12 @@ input[type="text"] {
   border-radius: 6px;
   font-size: 13px;
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-input[type="text"]:focus { border-color: var(--border-focus); }
+input[type="text"]:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 8px rgba(255, 113, 206, 0.3);
+}
 
 input[type="range"] { width: 100%; accent-color: var(--accent-cyan); }
 input[type="checkbox"] { accent-color: var(--accent-cyan); }
