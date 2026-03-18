@@ -1,25 +1,28 @@
-/* nullphase dark theme for HTTP Graph Viewer */
+/* retrowave theme for HTTP Graph Viewer */
 
 :root {
-  --bg-page: #0d1117;
-  --bg-card: #161b22;
-  --bg-input: #1c2129;
-  --bg-hover: #1f2937;
-  --border: #30363d;
-  --border-focus: #3b82f6;
-  --text-primary: #f0f6fc;
-  --text-secondary: #8b949e;
-  --text-muted: #6b7280;
-  --blue: #3b82f6;
-  --blue-hover: #2563eb;
-  --green: #10b981;
+  --bg-page: #0d0221;
+  --bg-card: #150533;
+  --bg-input: #1a0a3e;
+  --bg-hover: #2a0f5a;
+  --border: #3d1a7a;
+  --border-focus: #ff71ce;
+  --text-primary: #f0e6ff;
+  --text-secondary: #b8a0d4;
+  --text-muted: #7a5fa0;
+  --accent-pink: #ff71ce;
+  --accent-pink-hover: #ff99dd;
+  --accent-cyan: #01cdfe;
+  --accent-violet: #b967ff;
+  --accent-yellow: #fffb96;
+  --accent-mint: #05ffa1;
   --red: #ef4444;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-family: 'Oxanium', sans-serif;
   background: var(--bg-page);
   color: var(--text-primary);
   display: flex;
@@ -40,6 +43,7 @@ body {
 }
 
 #sidebar h1 {
+  font-family: 'Michroma', sans-serif;
   font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -48,6 +52,7 @@ body {
 }
 
 #sidebar h2 {
+  font-family: 'Michroma', sans-serif;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
@@ -65,7 +70,7 @@ section { display: flex; flex-direction: column; gap: 6px; }
 }
 
 .hint a, #sidebar a {
-  color: var(--blue);
+  color: var(--accent-pink);
   text-decoration: none;
 }
 
@@ -79,8 +84,8 @@ section { display: flex; flex-direction: column; gap: 6px; }
 .file-btn {
   display: inline-block;
   padding: 8px 14px;
-  background: var(--blue);
-  color: #fff;
+  background: var(--bg-input);
+  color: var(--accent-pink);
   border-radius: 6px;
   cursor: pointer;
   font-size: 13px;
@@ -88,7 +93,7 @@ section { display: flex; flex-direction: column; gap: 6px; }
   text-align: center;
   transition: background-color 0.15s;
 }
-.file-btn:hover { background: var(--blue-hover); }
+.file-btn:hover { background: var(--bg-hover); }
 .file-btn input { display: none; }
 
 /* Live connection */
@@ -96,7 +101,7 @@ section { display: flex; flex-direction: column; gap: 6px; }
   font-size: 11px;
   margin-top: 2px;
 }
-#live-status.connected { color: var(--green); }
+#live-status.connected { color: var(--accent-mint); }
 #live-status.error { color: var(--red); }
 #live-status.disconnected { color: var(--text-muted); }
 
@@ -111,7 +116,7 @@ button {
   transition: background-color 0.15s;
 }
 button:hover { background: var(--bg-hover); }
-button.active { background: var(--blue); border-color: var(--blue); }
+button.active { background: rgba(1, 205, 254, 0.1); border-color: var(--accent-cyan); }
 
 .btn-group { display: flex; gap: 4px; flex-wrap: wrap; }
 
@@ -119,7 +124,7 @@ button.active { background: var(--blue); border-color: var(--blue); }
 #fa2-settings { margin-top: 6px; }
 .setting-row { margin-bottom: 4px; }
 .setting-row label { font-size: 11px; display: flex; justify-content: space-between; color: var(--text-secondary); }
-.setting-row label span { color: var(--blue); font-variant-numeric: tabular-nums; min-width: 3em; text-align: right; }
+.setting-row label span { color: var(--accent-cyan); font-variant-numeric: tabular-nums; min-width: 3em; text-align: right; }
 .setting-row input[type="range"] { width: 100%; margin-top: 1px; }
 .setting-checks { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 4px; }
 .setting-checks label { font-size: 11px; cursor: pointer; color: var(--text-secondary); }
@@ -138,8 +143,8 @@ input[type="text"] {
 }
 input[type="text"]:focus { border-color: var(--border-focus); }
 
-input[type="range"] { width: 100%; accent-color: var(--blue); }
-input[type="checkbox"] { accent-color: var(--blue); }
+input[type="range"] { width: 100%; accent-color: var(--accent-cyan); }
+input[type="checkbox"] { accent-color: var(--accent-cyan); }
 
 /* Type & domain filter checkboxes */
 #type-filters, #domain-filters {
@@ -214,7 +219,7 @@ input[type="checkbox"] { accent-color: var(--blue); }
   max-width: 340px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.5);
 }
-#tooltip .tt-label { font-weight: 600; color: var(--blue); margin-bottom: 3px; }
+#tooltip .tt-label { font-weight: 600; color: var(--accent-pink); margin-bottom: 3px; }
 #tooltip .tt-row { color: var(--text-secondary); }
 #tooltip .tt-key { color: var(--text-muted); }
 
