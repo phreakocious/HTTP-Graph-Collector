@@ -225,7 +225,6 @@
   let liveBuilder = null;
   let livePort = null;
   let liveRefreshTimer = null;
-  let liveFilterTimer = null;
   let liveMode = false;
 
   // ── DOM refs ───────────────────────────────────────────────────────
@@ -1271,7 +1270,6 @@
       btnLive.classList.remove("active");
       livePort = null;
       liveMode = false;
-      clearInterval(liveFilterTimer);
     });
 
     liveStatus.textContent = "Connected";
@@ -1284,14 +1282,6 @@
       initRenderer({ autoStartFA2: false });
     }
 
-    // Periodically refresh filters/search for newly arrived nodes
-    liveFilterTimer = setInterval(function () {
-      if (graph && graph.order > 0 && renderer) {
-        setupSearch();
-        setupTypeFilters();
-        setupDomainFilters();
-      }
-    }, 3000);
   }
 
   function disconnectLive() {
@@ -1300,7 +1290,6 @@
       livePort = null;
     }
     liveMode = false;
-    clearInterval(liveFilterTimer);
     if (liveRefreshTimer) {
       clearTimeout(liveRefreshTimer);
       liveRefreshTimer = null;
@@ -1313,6 +1302,9 @@
       liveRefreshTimer = null;
       if (renderer) {
         graphStats.textContent = graph.order + " nodes, " + graph.size + " edges";
+        setupSearch();
+        setupTypeFilters();
+        setupDomainFilters();
         renderer.refresh();
       }
       // Wake FA2 if it went idle — new nodes need layout
