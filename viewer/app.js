@@ -407,7 +407,7 @@
         labelRenderedSizeThreshold: 6,
         labelFont: "Oxanium, sans-serif",
         labelColor: { color: "#f0e6ff" },
-        defaultEdgeColor: "#3d1a7a",
+        defaultEdgeColor: "rgba(61, 26, 122, 0.4)",
         defaultEdgeType: "arrow",
         defaultDrawNodeHover: drawNodeHover,
       });
