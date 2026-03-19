@@ -542,7 +542,7 @@
   var fa2UseWorker = false; // whether web worker is available
   var fa2Settings = {};     // current FA2 algorithm settings
   var fa2Iters = 5;         // iterations per tick
-  var fa2SettleThreshold = 0.05; // avg displacement to go idle
+  var fa2SettleThreshold = 0.5; // avg displacement to go idle
   var fa2LayoutGraph = null; // filtered subgraph used for layout (visible nodes only)
 
   // DOM refs for FA2 settings panel
@@ -566,7 +566,7 @@
   var FA2_WORKER_BODY = [
     "var Graph = typeof graphology === 'function' ? graphology : graphology.Graph;",
     "var fa2 = graphologyLibrary.layoutForceAtlas2;",
-    "var graph = null, nodeKeys = [], running = false, settings = {}, iters = 5, settleThreshold = 0.05;",
+    "var graph = null, nodeKeys = [], running = false, settings = {}, iters = 5, settleThreshold = 0.5;",
     "var prevPos = null, tickCount = 0;",
     "self.onmessage = function(e) {",
     "  var m = e.data;",
@@ -703,7 +703,7 @@
     document.getElementById("fa2-slowdown-val").textContent = fa2SlowdownSlider.value;
     document.getElementById("fa2-theta-val").textContent = (fa2ThetaSlider.value / 10).toFixed(1);
     document.getElementById("fa2-iters-val").textContent = fa2ItersSlider.value;
-    fa2SettleVal.textContent = Number(fa2SettleSlider.value).toFixed(2);
+    fa2SettleVal.textContent = Number(fa2SettleSlider.value).toFixed(1);
   }
 
   function readFA2Settings() {
