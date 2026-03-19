@@ -4,6 +4,26 @@
   // graphology UMD exports the Graph constructor directly as the global
   const Graph = typeof graphology === "function" ? graphology : graphology.Graph;
 
+  let theme = {};
+  function initTheme() {
+    var style = getComputedStyle(document.documentElement);
+    theme = {
+      bgPage: style.getPropertyValue('--bg-page').trim() || "#0d0221",
+      bgCard: style.getPropertyValue('--bg-card').trim() || "#150533",
+      border: style.getPropertyValue('--border').trim() || "#3d1a7a",
+      textPrimary: style.getPropertyValue('--text-primary').trim() || "#f0e6ff",
+      textSecondary: style.getPropertyValue('--text-secondary').trim() || "#b8a0d4",
+      textMuted: style.getPropertyValue('--text-muted').trim() || "#7a5fa0",
+      accentPink: style.getPropertyValue('--accent-pink').trim() || "#ff71ce",
+      accentCyan: style.getPropertyValue('--accent-cyan').trim() || "#01cdfe",
+      accentViolet: style.getPropertyValue('--accent-violet').trim() || "#b967ff",
+      accentYellow: style.getPropertyValue('--accent-yellow').trim() || "#fffb96",
+      accentMint: style.getPropertyValue('--accent-mint').trim() || "#05ffa1",
+      red: style.getPropertyValue('--red').trim() || "#ef4444",
+    };
+  }
+  initTheme();
+
   // ── Live Graph Builder ───────────────────────────────────────────
   function hsvToRgb(h, s, v) {
     var i = Math.floor(h * 6), f = h * 6 - i;
@@ -26,7 +46,7 @@
       hash = str.charCodeAt(i) + ((hash << 5) - hash);
     }
     var h = ((hash % 360) + 360) % 360;
-    return hsvToRgb(h / 360, 0.85, 0.93);
+    return hsvToRgb(h / 360, 0.60, 0.80);
   }
 
   var MULTI_TLDS = new Set([
@@ -345,7 +365,7 @@
     // Draw halo
     context.beginPath();
     context.arc(data.x, data.y, size + 2, 0, Math.PI * 2);
-    context.fillStyle = "#3b82f640";
+    context.fillStyle = theme.accentCyan + "40";
     context.fill();
     // Draw node
     context.beginPath();
@@ -361,14 +381,14 @@
       var x = data.x + size + 3;
       var y = data.y + fontSize / 3;
       var pad = 3;
-      context.fillStyle = "#150533E0";
+      context.fillStyle = theme.bgCard + "E0";
       context.beginPath();
       context.roundRect(x - pad, data.y - fontSize / 2 - pad, textWidth + pad * 2, fontSize + pad * 2, 3);
       context.fill();
-      context.strokeStyle = "#3d1a7a";
+      context.strokeStyle = theme.border;
       context.lineWidth = 1;
       context.stroke();
-      context.fillStyle = "#f0e6ff";
+      context.fillStyle = theme.textPrimary;
       context.fillText(data.label, x, y);
     }
   }
@@ -442,7 +462,7 @@
         labelRenderedSizeThreshold: 6,
         labelFont: "Oxanium, sans-serif",
         labelColor: { color: "#f0e6ff" },
-        defaultEdgeColor: "#1a0a3e",
+        defaultEdgeColor: theme.border,
         defaultEdgeType: "arrow",
         defaultDrawNodeHover: drawNodeHover,
       });
@@ -512,6 +532,7 @@
 
   // ── Node / Edge Reducers ───────────────────────────────────────────
   function isNodeHidden(key, attrs) {
+    if (!attrs) attrs = graph.getNodeAttributes(key);
     if (manuallyHidden.has(key) && !showHidden) return true;
     if (hiddenTypes.has(attrs.node_type)) return true;
     if (hiddenDomains.has(attrs.domain)) return true;
@@ -522,13 +543,7 @@
     return false;
   }
 
-  function nodeReducer(key, attrs) {
-    var res = Object.assign({}, attrs);
-
-    if (isNodeHidden(key, attrs)) { res.hidden = true; return res; }
-    if (manuallyHidden.has(key) && showHidden) { res.color = "#30363d"; }
-
-    // Dynamic Size Scaling
+  function getVisualSize(key, attrs) {
     var mult = Number(sizeMultSlider.value) || 1;
     if (sizeMode !== "default") {
       var minSize = Number(sizeMinSlider.value);
@@ -537,14 +552,24 @@
       var useLog = sizeMode === "visited-log";
       var logMax = useLog ? Math.log1p(maxVisitedCount) : maxVisitedCount;
       var norm = logMax > 1 ? (useLog ? Math.log1p(v) : v) / logMax : 0;
-      res.size = (minSize + norm * (maxSize - minSize)) * mult;
+      return (minSize + norm * (maxSize - minSize)) * mult;
     } else {
-      res.size = (originalSizes[key] || 3) * mult;
+      return (originalSizes[key] || 3) * mult;
     }
+  }
+
+  function nodeReducer(key, attrs) {
+    var res = Object.assign({}, attrs);
+
+    if (isNodeHidden(key, attrs)) { res.hidden = true; return res; }
+    if (manuallyHidden.has(key) && showHidden) { res.color = theme.textMuted; }
+
+    // Dynamic Size Scaling
+    res.size = getVisualSize(key, attrs);
 
     // Hover dimming
     if (hoveredNode && hoveredNode !== key && !graph.areNeighbors(hoveredNode, key)) {
-      res.color = "#1c2129";
+      res.color = theme.bgCard;
       res.label = "";
       res.zIndex = 0;
     } else if (hoveredNode && (hoveredNode === key || graph.areNeighbors(hoveredNode, key))) {
@@ -578,13 +603,24 @@
     // Focus mode
     if (focusSet && (!focusSet.has(source) || !focusSet.has(target))) { res.hidden = true; return res; }
 
+    var isCrossDomain = (sAttrs.domain && tAttrs.domain && sAttrs.domain !== tAttrs.domain && sAttrs.node_type !== 'client' && tAttrs.node_type !== 'client');
+
     // Hover dimming
     if (hoveredNode && source !== hoveredNode && target !== hoveredNode) {
-      res.color = "#0d0221";
+      res.color = theme.bgPage;
       res.zIndex = 0;
     } else if (hoveredNode) {
-      res.color = "#b967ff";
+      res.color = theme.textPrimary + "A0";
+      res.size = res.size ? res.size * 1.2 : 1.5;
       res.zIndex = 1;
+    } else {
+      if (isCrossDomain) {
+        res.color = theme.textMuted + "40";
+        res.zIndex = 1;
+      } else {
+        res.color = theme.border + "50";
+        res.zIndex = 0;
+      }
     }
 
     return res;
@@ -611,10 +647,12 @@
   var fa2BHCheck = document.getElementById("fa2-barneshut");
   var fa2SGCheck = document.getElementById("fa2-stronggrav");
   var fa2LLCheck = document.getElementById("fa2-linlog");
+  var fa2MFCheck = document.getElementById("fa2-multifocal");
+  var fa2ASCheck = document.getElementById("fa2-adjustsizes");
   var fa2ModeLabel = document.getElementById("fa2-mode");
 
   // CDN URLs (same as in index.html, fetched from cache for the worker)
-  var CDN_GRAPHOLOGY = "https://unpkg.com/graphology@0.25.4/dist/graphology.umd.min.js";
+  var CDN_GRAPHOLOGY = "https://unpkg.com/graphology@0.26.0/dist/graphology.umd.min.js";
   var CDN_LIBRARY = "https://cdn.jsdelivr.net/npm/graphology-library@0.8.0/dist/graphology-library.min.js";
 
   var FA2_WORKER_BODY = [
@@ -644,6 +682,21 @@
     "  if (!running) return;",
     "  tickCount++;",
     "  fa2.assign(graph, { iterations: iters, settings: settings });",
+    "  if (settings.multiFocal) {",
+    "    for (var i = 0; i < nodeKeys.length; i++) {",
+    "      var a = graph.getNodeAttributes(nodeKeys[i]);",
+    "      if (a.domain && a.domain !== 'localdomain') {",
+    "        var hash = 0; for(var j=0; j<a.domain.length; j++) hash = a.domain.charCodeAt(j) + ((hash << 5) - hash);",
+    "        var h = ((hash % 360) + 360) % 360;",
+    "        var angle = (h / 360) * 2 * Math.PI;",
+    "        var tx = Math.cos(angle) * 800;",
+    "        var ty = Math.sin(angle) * 800;",
+    "        var pull = 0.004;",
+    "        graph.setNodeAttribute(nodeKeys[i], 'x', a.x + (tx - a.x) * pull);",
+    "        graph.setNodeAttribute(nodeKeys[i], 'y', a.y + (ty - a.y) * pull);",
+    "      }",
+    "    }",
+    "  }",
     "  var buf = new Float64Array(nodeKeys.length * 2);",
     "  var totalDisp = 0;",
     "  for (var i = 0; i < nodeKeys.length; i++) {",
@@ -666,25 +719,13 @@
     "}"
   ].join("\n");
 
-  // Check whether a node is currently hidden by any filter
-  function isNodeHidden(key) {
-    if (manuallyHidden.has(key) && !showHidden) return true;
-    var attrs = graph.getNodeAttributes(key);
-    if (hiddenTypes.has(attrs.node_type)) return true;
-    if (hiddenDomains.has(attrs.domain)) return true;
-    if (hiddenContentGroups.size > 0 && attrs.node_type === "resource" && attrs.content_type) {
-      if (hiddenContentGroups.has(classifyContent(attrs.content_type))) return true;
-    }
-    if (focusSet && !focusSet.has(key)) return true;
-    return false;
-  }
-
   // Build a subgraph containing only visible nodes for layout
   function buildLayoutGraph() {
     var lg = new Graph();
     graph.forEachNode(function (key, attrs) {
       if (!isNodeHidden(key)) {
-        lg.addNode(key, { x: attrs.x, y: attrs.y, size: attrs.size });
+        // Artificially inflate the size given to FA2 so it pushes nodes further apart
+        lg.addNode(key, { x: attrs.x, y: attrs.y, size: getVisualSize(key, attrs) * 2.0 + 5 });
       }
     });
     graph.forEachEdge(function (edge, attrs, source, target) {
@@ -737,7 +778,8 @@
       barnesHutTheta: inferred.barnesHutTheta || 0.5,
       strongGravityMode: inferred.strongGravityMode || false,
       linLogMode: inferred.linLogMode || false,
-      adjustSizes: false,
+      multiFocal: fa2MFCheck ? fa2MFCheck.checked : true,
+      adjustSizes: fa2ASCheck ? fa2ASCheck.checked : false,
       outboundAttractionDistribution: false,
     };
     fa2Iters = 5;
@@ -751,6 +793,7 @@
     fa2BHCheck.checked = fa2Settings.barnesHutOptimize;
     fa2SGCheck.checked = fa2Settings.strongGravityMode;
     fa2LLCheck.checked = fa2Settings.linLogMode;
+    if (fa2ASCheck) fa2ASCheck.checked = fa2Settings.adjustSizes;
     updateFA2Labels();
   }
 
@@ -771,6 +814,8 @@
     fa2Settings.barnesHutOptimize = fa2BHCheck.checked;
     fa2Settings.strongGravityMode = fa2SGCheck.checked;
     fa2Settings.linLogMode = fa2LLCheck.checked;
+    if (fa2MFCheck) fa2Settings.multiFocal = fa2MFCheck.checked;
+    if (fa2ASCheck) fa2Settings.adjustSizes = fa2ASCheck.checked;
     fa2Iters = Number(fa2ItersSlider.value);
     fa2SettleThreshold = Number(fa2SettleSlider.value);
     updateFA2Labels();
@@ -788,8 +833,8 @@
   [fa2ScalingSlider, fa2GravitySlider, fa2SlowdownSlider, fa2ThetaSlider, fa2ItersSlider, fa2SettleSlider].forEach(function (el) {
     el.addEventListener("input", pushFA2Settings);
   });
-  [fa2BHCheck, fa2SGCheck, fa2LLCheck].forEach(function (el) {
-    el.addEventListener("change", pushFA2Settings);
+  [fa2BHCheck, fa2SGCheck, fa2LLCheck, fa2MFCheck, fa2ASCheck].forEach(function (el) {
+    if (el) el.addEventListener("change", pushFA2Settings);
   });
 
   async function startFA2() {
@@ -890,6 +935,20 @@
     if (!fa2Running || fa2UseWorker || !fa2LayoutGraph) return;
     readFA2Settings();
     graphologyLibrary.layoutForceAtlas2.assign(fa2LayoutGraph, { iterations: fa2Iters, settings: fa2Settings });
+    if (fa2Settings.multiFocal) {
+      fa2LayoutGraph.forEachNode(function(key, a) {
+        if (a.domain && a.domain !== 'localdomain') {
+          var hash = 0; for(var j=0; j<a.domain.length; j++) hash = a.domain.charCodeAt(j) + ((hash << 5) - hash);
+          var h = ((hash % 360) + 360) % 360;
+          var angle = (h / 360) * 2 * Math.PI;
+          var tx = Math.cos(angle) * 800;
+          var ty = Math.sin(angle) * 800;
+          var pull = 0.004;
+          fa2LayoutGraph.setNodeAttribute(key, 'x', a.x + (tx - a.x) * pull);
+          fa2LayoutGraph.setNodeAttribute(key, 'y', a.y + (ty - a.y) * pull);
+        }
+      });
+    }
     applyLayoutPositions(fa2LayoutGraph);
     if (renderer) renderer.refresh();
     fa2FrameId = requestAnimationFrame(runFA2Sync);
@@ -930,6 +989,9 @@
       sizeRangeDiv.classList.remove("hidden");
     }
     if (renderer) renderer.refresh();
+    if (fa2Running && fa2Settings.adjustSizes) {
+      restartFA2IfRunning(); // Sizes changed, physics need to recalculate
+    }
   }
 
   btnSizeDefault.addEventListener("click", function () { sizeMode = "default"; applySizeMode(); });
@@ -1080,8 +1142,8 @@
 
   // ── Type Filters ───────────────────────────────────────────────────
   var TYPE_COLORS = {
-    client: "#ececec", domain: "#e94560", host: "#0f3460",
-    resource: "#53a8b6", ip: "#f5a623", params: "#7b68ee"
+    client: theme.textPrimary, domain: theme.accentPink, host: theme.accentCyan,
+    resource: theme.accentViolet, ip: theme.accentYellow, params: theme.accentMint
   };
 
   function setupTypeFilters() {
