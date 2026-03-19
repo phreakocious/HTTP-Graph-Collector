@@ -221,6 +221,7 @@
   let focusSet = null;        // Set of node keys visible in focus mode
   let hiddenTypes = new Set(); // node_type values currently hidden
   let hiddenDomains = new Set();
+  let hiddenContentGroups = new Set();
   let domainFilterText = "";
   let manuallyHidden = new Set(); // nodes hidden via right-click
   let showHidden = false;         // toggle to reveal manually hidden nodes
@@ -395,6 +396,7 @@
     focusSet = null;
     hiddenTypes.clear();
     hiddenDomains.clear();
+    hiddenContentGroups.clear();
     domainFilterText = "";
     manuallyHidden.clear();
     showHidden = false;
@@ -428,6 +430,7 @@
 
       setupSearch();
       setupTypeFilters();
+      setupContentFilters();
       setupDomainFilters();
       setupHover();
       setupInfoPanel();
@@ -488,6 +491,11 @@
 
     // Domain filter
     if (hiddenDomains.has(attrs.domain)) { res.hidden = true; return res; }
+
+    // Content group filter
+    if (hiddenContentGroups.size > 0 && attrs.node_type === "resource" && attrs.content_type) {
+      if (hiddenContentGroups.has(classifyContent(attrs.content_type))) { res.hidden = true; return res; }
+    }
 
     // Focus mode
     if (focusSet && !focusSet.has(key)) { res.hidden = true; return res; }
@@ -622,6 +630,9 @@
     var attrs = graph.getNodeAttributes(key);
     if (hiddenTypes.has(attrs.node_type)) return true;
     if (hiddenDomains.has(attrs.domain)) return true;
+    if (hiddenContentGroups.size > 0 && attrs.node_type === "resource" && attrs.content_type) {
+      if (hiddenContentGroups.has(classifyContent(attrs.content_type))) return true;
+    }
     if (focusSet && !focusSet.has(key)) return true;
     return false;
   }
@@ -1077,6 +1088,63 @@
     });
   }
 
+  // ── Content Group Filters ──────────────────────────────────────────
+  var CONTENT_GROUPS = {
+    "Scripts":    [/javascript/, /ecmascript/],
+    "Styles":     [/css/],
+    "Documents":  [/html/, /xhtml/],
+    "Data":       [/json/, /xml/, /protobuf/, /graphql/],
+    "Images":     [/image\//],
+    "Fonts":      [/font\//, /woff/, /ttf/, /otf/],
+    "Media":      [/video\//, /audio\//],
+    "WASM":       [/wasm/],
+  };
+
+  function classifyContent(contentType) {
+    if (!contentType) return "Unknown";
+    var ct = contentType.toLowerCase().split(";")[0].trim();
+    for (var group in CONTENT_GROUPS) {
+      for (var i = 0; i < CONTENT_GROUPS[group].length; i++) {
+        if (CONTENT_GROUPS[group][i].test(ct)) return group;
+      }
+    }
+    return "Other";
+  }
+
+  var contentFiltersDiv = document.getElementById("content-filters");
+
+  function setupContentFilters() {
+    contentFiltersDiv.innerHTML = "";
+    var groups = new Set();
+    graph.forEachNode(function (key, attrs) {
+      if (attrs.node_type === "resource" && attrs.content_type) {
+        groups.add(classifyContent(attrs.content_type));
+      }
+    });
+
+    var sorted = Array.from(groups).sort();
+    sorted.forEach(function (group) {
+      var label = document.createElement("label");
+      var cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = !hiddenContentGroups.has(group);
+      cb.dataset.contentGroup = group;
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(" " + group));
+      contentFiltersDiv.appendChild(label);
+
+      cb.addEventListener("change", function () {
+        if (cb.checked) {
+          hiddenContentGroups.delete(group);
+        } else {
+          hiddenContentGroups.add(group);
+        }
+        if (renderer) renderer.refresh();
+        restartFA2IfRunning();
+      });
+    });
+  }
+
   // ── Domain Filters ─────────────────────────────────────────────────
   function setupDomainFilters() {
     domainFiltersDiv.innerHTML = "";
@@ -1124,6 +1192,7 @@
     focusSet = null;
     hiddenTypes.clear();
     hiddenDomains.clear();
+    hiddenContentGroups.clear();
     manuallyHidden.clear();
     showHidden = false;
     showHiddenCb.checked = false;
@@ -1135,6 +1204,7 @@
 
     // Re-check all type checkboxes
     typeFiltersDiv.querySelectorAll("input").forEach(function (cb) { cb.checked = true; });
+    contentFiltersDiv.querySelectorAll("input").forEach(function (cb) { cb.checked = true; });
     domainFiltersDiv.querySelectorAll("input").forEach(function (cb) { cb.checked = true; });
     domainFiltersDiv.querySelectorAll("label").forEach(function (lbl) { lbl.style.display = ""; });
 
@@ -1384,6 +1454,7 @@
         graphStats.textContent = graph.order + " nodes, " + graph.size + " edges";
         setupSearch();
         setupTypeFilters();
+        setupContentFilters();
         setupDomainFilters();
         renderer.refresh();
       }
