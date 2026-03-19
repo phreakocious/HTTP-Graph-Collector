@@ -38,7 +38,7 @@ body {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   border-right: 1px solid var(--border);
 }
 
@@ -48,7 +48,6 @@ body {
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--text-primary);
-  margin-bottom: 4px;
 }
 
 #sidebar h2 {
@@ -58,10 +57,9 @@ body {
   color: var(--accent-violet);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  margin-bottom: 6px;
 }
 
-section { display: flex; flex-direction: column; gap: 6px; }
+section { display: flex; flex-direction: column; gap: 8px; }
 
 .hint {
   font-size: 11px;
@@ -104,7 +102,6 @@ section { display: flex; flex-direction: column; gap: 6px; }
 /* Live connection */
 #live-status {
   font-size: 11px;
-  margin-top: 2px;
 }
 #live-status.connected { color: var(--accent-mint); }
 #live-status.error { color: var(--red); }
@@ -132,10 +129,9 @@ button.active {
   box-shadow: 0 0 8px var(--accent-cyan);
 }
 
-.btn-group { display: flex; gap: 4px; flex-wrap: wrap; }
+.btn-group { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
 
 /* FA2 settings */
-#fa2-settings { margin-top: 6px; }
 .setting-row { margin-bottom: 4px; }
 .setting-row label { font-size: 11px; display: flex; justify-content: space-between; color: var(--text-secondary); }
 .setting-row label span { color: var(--accent-cyan); font-variant-numeric: tabular-nums; min-width: 3em; text-align: right; }
@@ -190,7 +186,6 @@ input[type="checkbox"] { accent-color: var(--accent-cyan); }
 #graph-stats {
   font-size: 11px;
   color: var(--text-muted);
-  margin-top: 2px;
 }
 
 /* Info panel */
@@ -298,5 +293,4 @@ input[type="checkbox"] { accent-color: var(--accent-cyan); }
 #show-hidden-label {
   font-size: 12px;
   cursor: pointer;
-  margin-top: 4px;
 }
