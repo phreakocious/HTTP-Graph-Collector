@@ -1529,6 +1529,54 @@
     }
   });
 
+  // ── UI Tooltips ──────────────────────────────────────────────────
+  (function () {
+    var tip = document.getElementById("ui-tip");
+    var showTimer = null;
+    var current = null;
+
+    function show(el) {
+      tip.textContent = el.getAttribute("data-tip");
+      var r = el.getBoundingClientRect();
+      var x = r.left;
+      var y = r.bottom + 6;
+      // Keep within viewport
+      tip.style.left = "0px";
+      tip.style.top = "0px";
+      tip.classList.add("visible");
+      var tw = tip.offsetWidth;
+      var th = tip.offsetHeight;
+      if (x + tw > window.innerWidth - 8) x = window.innerWidth - tw - 8;
+      if (x < 4) x = 4;
+      if (y + th > window.innerHeight - 8) y = r.top - th - 6; // flip above
+      tip.style.left = x + "px";
+      tip.style.top = y + "px";
+    }
+
+    function hide() {
+      clearTimeout(showTimer);
+      showTimer = null;
+      current = null;
+      tip.classList.remove("visible");
+    }
+
+    document.addEventListener("mouseover", function (e) {
+      var el = e.target.closest("[data-tip]");
+      if (!el || el === current) return;
+      hide();
+      current = el;
+      showTimer = setTimeout(function () { show(el); }, 400);
+    });
+
+    document.addEventListener("mouseout", function (e) {
+      var el = e.target.closest("[data-tip]");
+      if (el && el === current) hide();
+    });
+
+    document.addEventListener("mousedown", function () { hide(); });
+    document.addEventListener("scroll", function () { hide(); }, true);
+  })();
+
   // ── Util ───────────────────────────────────────────────────────────
   function escapeHtml(str) {
     var div = document.createElement("div");

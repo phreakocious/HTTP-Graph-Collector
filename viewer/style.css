@@ -302,3 +302,29 @@ input[type="checkbox"] { accent-color: var(--accent-cyan); }
   font-size: 12px;
   cursor: pointer;
 }
+
+/* Styled tooltips (positioned via JS, appended to body) */
+#ui-tip {
+  position: fixed;
+  z-index: 40;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  border: 1px solid var(--accent-violet);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-family: 'Oxanium', sans-serif;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: normal;
+  max-width: 240px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 0.15s, transform 0.15s;
+  box-shadow: 0 4px 12px rgba(13, 2, 33, 0.8), 0 0 8px rgba(185, 103, 255, 0.15);
+}
+#ui-tip.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
