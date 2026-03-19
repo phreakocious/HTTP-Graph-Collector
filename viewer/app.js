@@ -75,11 +75,20 @@
     return label;
   };
 
-  LiveGraphBuilder.prototype.addNode = function (nodeId, nodeType, domain, size, label, attrs) {
+  LiveGraphBuilder.prototype.addNode = function (nodeId, nodeType, domain, size, label, attrs, parentId) {
     if (this.graph.hasNode(nodeId)) {
       var v = this.graph.getNodeAttribute(nodeId, "visited") || 1;
       this.graph.setNodeAttribute(nodeId, "visited", v + 1);
       return;
+    }
+    var px, py;
+    if (parentId && this.graph.hasNode(parentId)) {
+      var pa = this.graph.getNodeAttributes(parentId);
+      px = pa.x + (Math.random() - 0.5) * 50;
+      py = pa.y + (Math.random() - 0.5) * 50;
+    } else {
+      px = (Math.random() - 0.5) * 1000;
+      py = (Math.random() - 0.5) * 1000;
     }
     var color = domain === "localdomain" ? COLOR_LOCALDOMAIN : this.assignColor(domain);
     var nodeAttrs = {
@@ -89,8 +98,8 @@
       visited: 1,
       size: size,
       color: this.rgbStr(color),
-      x: (Math.random() - 0.5) * 1000,
-      y: (Math.random() - 0.5) * 1000,
+      x: px,
+      y: py,
     };
     if (attrs) Object.assign(nodeAttrs, attrs);
     this.graph.addNode(nodeId, nodeAttrs);
@@ -120,8 +129,8 @@
     var domain = parseDomain(host);
     var resourceId = host + parsed.pathname;
     this.addNode(domain, "domain", domain, 6.0);
-    this.addNode(host, "host", domain, 4.0);
-    this.addNode(resourceId, "resource", domain, 3.0, this.formatLabel(resourceId));
+    this.addNode(host, "host", domain, 4.0, undefined, undefined, domain);
+    this.addNode(resourceId, "resource", domain, 3.0, this.formatLabel(resourceId), undefined, host);
     this.addEdge(domain, host);
     this.addEdge(host, resourceId);
     return resourceId;
@@ -147,7 +156,7 @@
     var resourceId = host + parsed.pathname;
 
     this.addNode(domain, "domain", domain, 6.0);
-    this.addNode(host, "host", domain, 4.0);
+    this.addNode(host, "host", domain, 4.0, undefined, undefined, domain);
 
     var resourceAttrs = {
       method: record.method || "",
@@ -159,7 +168,7 @@
     };
     if (record.bytes) resourceAttrs.bytes = parseInt(record.bytes, 10) || 0;
     if (record.duration_ms != null) resourceAttrs.duration_ms = record.duration_ms;
-    this.addNode(resourceId, "resource", domain, 3.0, this.formatLabel(resourceId), resourceAttrs);
+    this.addNode(resourceId, "resource", domain, 3.0, this.formatLabel(resourceId), resourceAttrs, host);
 
     var clientId = record.client || "localhost";
     this.addNode(clientId, "client", "localdomain", 8.0);
@@ -175,7 +184,7 @@
         if ((ip.protocol === "http:" || ip.protocol === "https:") && ip.hostname) {
           var ih = ip.hostname, id = parseDomain(ih);
           this.addNode(id, "domain", id, 6.0);
-          this.addNode(ih, "host", id, 4.0);
+          this.addNode(ih, "host", id, 4.0, undefined, undefined, id);
           this.addEdge(id, ih);
           this.addEdge(ih, resourceId);
         }
@@ -189,7 +198,7 @@
         if ((rp.protocol === "http:" || rp.protocol === "https:") && rp.hostname) {
           var rh = rp.hostname, rd = parseDomain(rh), rr = rh + rp.pathname;
           this.addNode(rd, "domain", rd, 6.0);
-          this.addNode(rh, "host", rd, 4.0);
+          this.addNode(rh, "host", rd, 4.0, undefined, undefined, rd);
           this.addEdge(rd, rh);
           if (this.graph.hasNode(rr)) this.addEdge(rr, resourceId);
           else this.addEdge(rh, resourceId);
