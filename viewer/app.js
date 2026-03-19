@@ -89,6 +89,7 @@
   LiveGraphBuilder.prototype.formatLabel = function (url) {
     var idx = url.indexOf("/");
     var label = idx >= 0 ? url.substring(idx) : url;
+    if (label === "/") label = url;
     if (label.length > MAXLABEL) label = "... " + label.substring(label.length - MAXLABEL);
     return label;
   };
@@ -292,8 +293,11 @@
   }
 
   function scheduleSave() {
-    // Disabled interval saves for performance.
-    // Saving happens on visibilitychange and beforeunload.
+    if (saveTimer) return;
+    saveTimer = setTimeout(function () {
+      saveTimer = null;
+      saveGraph();
+    }, 30000);
   }
 
   document.addEventListener("visibilitychange", function() {
@@ -527,7 +531,7 @@
 
     liveMode = false;
     initRenderer();
-    scheduleSave();
+    saveGraph();
   }
 
   // ── Node / Edge Reducers ───────────────────────────────────────────
@@ -713,7 +717,7 @@
     "  var avgDisp = nodeKeys.length > 0 ? totalDisp / nodeKeys.length : 0;",
     "  prevPos = new Float64Array(buf);",
     "  self.postMessage({ type: 'positions', buffer: buf.buffer, avgDisp: avgDisp }, [buf.buffer]);",
-    "  if (prevPos && tickCount > 50 && avgDisp < settleThreshold) {",
+    "  if (prevPos && tickCount > 20 && avgDisp < settleThreshold) {",
     "    running = false;",
     "    self.postMessage({ type: 'idle' });",
     "    return;",
@@ -727,8 +731,7 @@
     var lg = new Graph();
     graph.forEachNode(function (key, attrs) {
       if (!isNodeHidden(key)) {
-        // Artificially inflate the size given to FA2 so it pushes nodes further apart
-        lg.addNode(key, { x: attrs.x, y: attrs.y, size: getVisualSize(key, attrs) * 2.0 + 5 });
+        lg.addNode(key, { x: attrs.x, y: attrs.y, size: getVisualSize(key, attrs) });
       }
     });
     graph.forEachEdge(function (edge, attrs, source, target) {
@@ -777,7 +780,7 @@
     fa2Settings = {
       scalingRatio: inferred.scalingRatio || 10,
       gravity: inferred.gravity || 0.05,
-      slowDown: inferred.slowDown || 1,
+      slowDown: Math.min(inferred.slowDown || 1, 3),
       barnesHutOptimize: inferred.barnesHutOptimize !== false,
       barnesHutTheta: inferred.barnesHutTheta || 0.5,
       strongGravityMode: inferred.strongGravityMode || false,
@@ -786,7 +789,7 @@
       adjustSizes: fa2ASCheck ? fa2ASCheck.checked : false,
       outboundAttractionDistribution: false,
     };
-    fa2Iters = 5;
+    fa2Iters = 10;
 
     // Sync sliders to inferred values
     fa2ScalingSlider.value = fa2Settings.scalingRatio;
@@ -1609,8 +1612,8 @@
         setupDomainFilters();
         renderer.refresh();
       }
-      // Wake FA2 only if new nodes were actually added
-      if (fa2Idle && graphGrew) {
+      // Wake or restart FA2 when new visible nodes were added
+      if (graphGrew && (fa2Idle || fa2Running)) {
         restartFA2IfRunning();
       }
       graphGrew = false;
