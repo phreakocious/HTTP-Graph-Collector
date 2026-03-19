@@ -20,12 +20,13 @@
     return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
   }
 
-  function generatePalette() {
-    var colors = [];
-    var n = 26;
-    for (var i = 0; i < n; i++) colors.push(hsvToRgb(i / n, 0.85, 0.93));
-    for (var g = 32; g <= 200; g += 12) colors.push([g, g, g]);
-    return colors;
+  function stringToColor(str) {
+    var hash = 0;
+    for (var i = 0; i < str.length; i++) {
+      hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    var h = ((hash % 360) + 360) % 360;
+    return hsvToRgb(h / 360, 0.85, 0.93);
   }
 
   var MULTI_TLDS = new Set([
@@ -50,16 +51,13 @@
 
   function LiveGraphBuilder(g) {
     this.graph = g;
-    this.palette = generatePalette();
-    this.colorIdx = 0;
     this.colormap = {};
     this.edgeWeights = {};
   }
 
   LiveGraphBuilder.prototype.assignColor = function (domain) {
     if (!this.colormap[domain]) {
-      this.colormap[domain] = this.colorIdx < this.palette.length
-        ? this.palette[this.colorIdx++] : COLOR_DEFAULT;
+      this.colormap[domain] = stringToColor(domain);
     }
     return this.colormap[domain];
   };
@@ -79,6 +77,7 @@
     if (this.graph.hasNode(nodeId)) {
       var v = this.graph.getNodeAttribute(nodeId, "visited") || 1;
       this.graph.setNodeAttribute(nodeId, "visited", v + 1);
+      if (v + 1 > maxVisitedCount) maxVisitedCount = v + 1;
       // Backfill attrs on nodes created bare (e.g. via ensureHierarchy)
       if (attrs) {
         var cur = this.graph.getNodeAttributes(nodeId);
@@ -181,8 +180,9 @@
     if (record.duration_ms != null) resourceAttrs.duration_ms = record.duration_ms;
     this.addNode(resourceId, "resource", domain, 3.0, this.formatLabel(resourceId), resourceAttrs, host);
 
-    var clientId = record.client || "localhost";
-    this.addNode(clientId, "client", "localdomain", 8.0);
+    var clientName = record.client || "localhost";
+    var clientId = "client:" + clientName;
+    this.addNode(clientId, "client", "localdomain", 8.0, clientName);
 
     this.addEdge(clientId, resourceId);
     this.addEdge(domain, host);
@@ -193,11 +193,13 @@
       try {
         var ip = new URL(record.initiator);
         if ((ip.protocol === "http:" || ip.protocol === "https:") && ip.hostname) {
-          var ih = ip.hostname, id = parseDomain(ih);
+          var ih = ip.hostname, id = parseDomain(ih), ir = ih + ip.pathname;
           this.addNode(id, "domain", id, 6.0);
           this.addNode(ih, "host", id, 4.0, undefined, undefined, id);
+          this.addNode(ir, "resource", id, 3.0, this.formatLabel(ir), undefined, ih);
           this.addEdge(id, ih);
-          this.addEdge(ih, resourceId);
+          this.addEdge(ih, ir);
+          this.addEdge(ir, resourceId);
         }
       } catch (e) {}
     }
@@ -240,6 +242,11 @@
   let liveMode = false;
   let graphGrew = false;
   let saveTimer = null;
+  let maxVisitedCount = 1;
+  let renderedSearchNodes = new Set();
+  let renderedTypes = new Set();
+  let renderedContentGroups = new Set();
+  let renderedDomains = new Set();
 
   // ── IndexedDB persistence ─────────────────────────────────────────
   var DB_NAME = "httpgraph-viewer";
@@ -265,9 +272,19 @@
   }
 
   function scheduleSave() {
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveGraph, 2000);
+    // Disabled interval saves for performance.
+    // Saving happens on visibilitychange and beforeunload.
   }
+
+  document.addEventListener("visibilitychange", function() {
+    if (document.visibilityState === "hidden" && graph && graph.order > 0) {
+      saveGraph();
+    }
+  });
+
+  window.addEventListener("beforeunload", function() {
+    if (graph && graph.order > 0) saveGraph();
+  });
 
   function loadSavedGraph() {
     return openDB().then(function (db) {
@@ -410,6 +427,10 @@
     showHidden = false;
     showHiddenCb.checked = false;
     sizeMode = "default";
+    renderedSearchNodes.clear(); nodeList.innerHTML = "";
+    renderedTypes.clear(); typeFiltersDiv.innerHTML = "";
+    renderedContentGroups.clear(); contentFiltersDiv.innerHTML = "";
+    renderedDomains.clear(); domainFiltersDiv.innerHTML = "";
     updateHiddenCount();
 
     requestAnimationFrame(function () {
@@ -477,8 +498,11 @@
     });
 
     originalSizes = {};
+    maxVisitedCount = 1;
     graph.forEachNode(function (key, attrs) {
       originalSizes[key] = attrs.size || 3;
+      var v = Number(attrs.visited) || 1;
+      if (v > maxVisitedCount) maxVisitedCount = v;
     });
 
     liveMode = false;
@@ -503,6 +527,20 @@
 
     if (isNodeHidden(key, attrs)) { res.hidden = true; return res; }
     if (manuallyHidden.has(key) && showHidden) { res.color = "#30363d"; }
+
+    // Dynamic Size Scaling
+    var mult = Number(sizeMultSlider.value) || 1;
+    if (sizeMode !== "default") {
+      var minSize = Number(sizeMinSlider.value);
+      var maxSize = Number(sizeMaxSlider.value);
+      var v = Number(attrs.visited) || 1;
+      var useLog = sizeMode === "visited-log";
+      var logMax = useLog ? Math.log1p(maxVisitedCount) : maxVisitedCount;
+      var norm = logMax > 1 ? (useLog ? Math.log1p(v) : v) / logMax : 0;
+      res.size = (minSize + norm * (maxSize - minSize)) * mult;
+    } else {
+      res.size = (originalSizes[key] || 3) * mult;
+    }
 
     // Hover dimming
     if (hoveredNode && hoveredNode !== key && !graph.areNeighbors(hoveredNode, key)) {
@@ -887,28 +925,9 @@
     if (sizeMode === "default") {
       btnSizeDefault.classList.add("active");
       sizeRangeDiv.classList.add("hidden");
-      graph.forEachNode(function (key) {
-        graph.setNodeAttribute(key, "size", originalSizes[key] * mult);
-      });
     } else {
       (sizeMode === "visited" ? btnSizeVisited : btnSizeVisitedLog).classList.add("active");
       sizeRangeDiv.classList.remove("hidden");
-
-      // Find visited range
-      var maxVisited = 1;
-      graph.forEachNode(function (key, attrs) {
-        var v = Number(attrs.visited) || 1;
-        if (v > maxVisited) maxVisited = v;
-      });
-
-      var useLog = sizeMode === "visited-log";
-      var logMax = useLog ? Math.log1p(maxVisited) : maxVisited;
-
-      graph.forEachNode(function (key, attrs) {
-        var v = Number(attrs.visited) || 1;
-        var norm = logMax > 1 ? (useLog ? Math.log1p(v) : v) / logMax : 0;
-        graph.setNodeAttribute(key, "size", (minSize + norm * (maxSize - minSize)) * mult);
-      });
     }
     if (renderer) renderer.refresh();
   }
@@ -989,17 +1008,21 @@
   var labelMap = {};
 
   function setupSearch() {
-    // Build datalist
-    nodeList.innerHTML = "";
-    labelMap = {};
+    var fragment = document.createDocumentFragment();
+    var added = false;
     graph.forEachNode(function (key, attrs) {
-      var opt = document.createElement("option");
-      opt.value = attrs.label || key;
-      opt.dataset.key = key;
-      nodeList.appendChild(opt);
-      labelMap[attrs.label || key] = key;
+      var label = attrs.label || key;
+      if (!renderedSearchNodes.has(label)) {
+        renderedSearchNodes.add(label);
+        labelMap[label] = key;
+        var opt = document.createElement("option");
+        opt.value = label;
+        opt.dataset.key = key;
+        fragment.appendChild(opt);
+        added = true;
+      }
     });
-    searchInput.value = "";
+    if (added) nodeList.appendChild(fragment);
   }
 
   searchInput.addEventListener("input", function () {
@@ -1062,11 +1085,14 @@
   };
 
   function setupTypeFilters() {
-    typeFiltersDiv.innerHTML = "";
+    var fragment = document.createDocumentFragment();
+    var added = false;
     var types = new Set();
     graph.forEachNode(function (key, attrs) { if (attrs.node_type) types.add(attrs.node_type); });
 
     types.forEach(function (type) {
+      if (renderedTypes.has(type)) return;
+      renderedTypes.add(type);
       var label = document.createElement("label");
       var cb = document.createElement("input");
       cb.type = "checkbox";
@@ -1078,7 +1104,8 @@
       label.appendChild(cb);
       label.appendChild(swatch);
       label.appendChild(document.createTextNode(" " + type));
-      typeFiltersDiv.appendChild(label);
+      fragment.appendChild(label);
+      added = true;
 
       cb.addEventListener("change", function () {
         if (cb.checked) {
@@ -1091,6 +1118,7 @@
         restartFA2IfRunning();
       });
     });
+    if (added) typeFiltersDiv.appendChild(fragment);
   }
 
   // ── Content Group Filters ──────────────────────────────────────────
@@ -1119,7 +1147,8 @@
   var contentFiltersDiv = document.getElementById("content-filters");
 
   function setupContentFilters() {
-    contentFiltersDiv.innerHTML = "";
+    var fragment = document.createDocumentFragment();
+    var added = false;
     var groups = new Set();
     graph.forEachNode(function (key, attrs) {
       if (attrs.node_type === "resource" && attrs.content_type) {
@@ -1129,6 +1158,8 @@
 
     var sorted = Array.from(groups).sort();
     sorted.forEach(function (group) {
+      if (renderedContentGroups.has(group)) return;
+      renderedContentGroups.add(group);
       var label = document.createElement("label");
       var cb = document.createElement("input");
       cb.type = "checkbox";
@@ -1136,7 +1167,8 @@
       cb.dataset.contentGroup = group;
       label.appendChild(cb);
       label.appendChild(document.createTextNode(" " + group));
-      contentFiltersDiv.appendChild(label);
+      fragment.appendChild(label);
+      added = true;
 
       cb.addEventListener("change", function () {
         if (cb.checked) {
@@ -1149,16 +1181,25 @@
         restartFA2IfRunning();
       });
     });
+    if (added) {
+      contentFiltersDiv.appendChild(fragment);
+      var labels = Array.from(contentFiltersDiv.querySelectorAll("label"));
+      labels.sort((a, b) => a.textContent.localeCompare(b.textContent));
+      labels.forEach(lbl => contentFiltersDiv.appendChild(lbl));
+    }
   }
 
   // ── Domain Filters ─────────────────────────────────────────────────
   function setupDomainFilters() {
-    domainFiltersDiv.innerHTML = "";
+    var fragment = document.createDocumentFragment();
+    var added = false;
     var domains = new Set();
     graph.forEachNode(function (key, attrs) { if (attrs.domain) domains.add(attrs.domain); });
 
     var sortedDomains = Array.from(domains).sort();
     sortedDomains.forEach(function (domain) {
+      if (renderedDomains.has(domain)) return;
+      renderedDomains.add(domain);
       var label = document.createElement("label");
       var cb = document.createElement("input");
       cb.type = "checkbox";
@@ -1170,7 +1211,8 @@
       if (domainFilterText && !domain.toLowerCase().includes(domainFilterText)) {
         label.style.display = "none";
       }
-      domainFiltersDiv.appendChild(label);
+      fragment.appendChild(label);
+      added = true;
 
       cb.addEventListener("change", function () {
         if (cb.checked) {
@@ -1183,6 +1225,12 @@
         restartFA2IfRunning();
       });
     });
+    if (added) {
+      domainFiltersDiv.appendChild(fragment);
+      var labels = Array.from(domainFiltersDiv.querySelectorAll("label"));
+      labels.sort((a, b) => a.dataset.domain.localeCompare(b.dataset.domain));
+      labels.forEach(lbl => domainFiltersDiv.appendChild(lbl));
+    }
   }
 
   domainFilterInput.addEventListener("input", function () {
@@ -1516,8 +1564,11 @@
       graph = new Graph();
       graph.import(data.graph);
       originalSizes = data.originalSizes || {};
+      maxVisitedCount = 1;
       graph.forEachNode(function (key, attrs) {
         if (originalSizes[key] == null) originalSizes[key] = attrs.size || 3;
+        var v = Number(attrs.visited) || 1;
+        if (v > maxVisitedCount) maxVisitedCount = v;
       });
       initRenderer();
     }
