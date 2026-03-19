@@ -747,13 +747,17 @@
   var sizeMaxSlider = document.getElementById("size-max");
   var sizeMinVal = document.getElementById("size-min-val");
   var sizeMaxVal = document.getElementById("size-max-val");
+  var sizeMultSlider = document.getElementById("size-mult");
+  var sizeMultVal = document.getElementById("size-mult-val");
 
   function applySizeMode() {
     if (!graph) return;
     var minSize = Number(sizeMinSlider.value);
     var maxSize = Number(sizeMaxSlider.value);
+    var mult = Number(sizeMultSlider.value);
     sizeMinVal.textContent = minSize;
     sizeMaxVal.textContent = maxSize;
+    sizeMultVal.textContent = mult.toFixed(1);
 
     [btnSizeDefault, btnSizeVisited, btnSizeVisitedLog].forEach(function (b) { b.classList.remove("active"); });
 
@@ -761,7 +765,7 @@
       btnSizeDefault.classList.add("active");
       sizeRangeDiv.classList.add("hidden");
       graph.forEachNode(function (key) {
-        graph.setNodeAttribute(key, "size", originalSizes[key]);
+        graph.setNodeAttribute(key, "size", originalSizes[key] * mult);
       });
     } else {
       (sizeMode === "visited" ? btnSizeVisited : btnSizeVisitedLog).classList.add("active");
@@ -780,7 +784,7 @@
       graph.forEachNode(function (key, attrs) {
         var v = Number(attrs.visited) || 1;
         var norm = logMax > 1 ? (useLog ? Math.log1p(v) : v) / logMax : 0;
-        graph.setNodeAttribute(key, "size", minSize + norm * (maxSize - minSize));
+        graph.setNodeAttribute(key, "size", (minSize + norm * (maxSize - minSize)) * mult);
       });
     }
     if (renderer) renderer.refresh();
@@ -791,6 +795,7 @@
   btnSizeVisitedLog.addEventListener("click", function () { sizeMode = "visited-log"; applySizeMode(); });
   sizeMinSlider.addEventListener("input", applySizeMode);
   sizeMaxSlider.addEventListener("input", applySizeMode);
+  sizeMultSlider.addEventListener("input", applySizeMode);
 
   // ── Circular Layout ────────────────────────────────────────────────
   btnCircular.addEventListener("click", function () {
@@ -980,6 +985,9 @@
       label.appendChild(cb);
       label.appendChild(document.createTextNode(" " + domain));
       label.dataset.domain = domain;
+      if (domainFilterText && !domain.toLowerCase().includes(domainFilterText)) {
+        label.style.display = "none";
+      }
       domainFiltersDiv.appendChild(label);
 
       cb.addEventListener("change", function () {
@@ -992,8 +1000,6 @@
         restartFA2IfRunning();
       });
     });
-
-    domainFilterInput.value = "";
   }
 
   domainFilterInput.addEventListener("input", function () {
