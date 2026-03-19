@@ -226,6 +226,53 @@
   let livePort = null;
   let liveRefreshTimer = null;
   let liveMode = false;
+  let saveTimer = null;
+
+  // ── IndexedDB persistence ─────────────────────────────────────────
+  var DB_NAME = "httpgraph-viewer";
+  var DB_STORE = "graph";
+  var DB_KEY = "current";
+
+  function openDB() {
+    return new Promise(function (resolve, reject) {
+      var req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = function () { req.result.createObjectStore(DB_STORE); };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+
+  function saveGraph() {
+    if (!graph || graph.order === 0) return;
+    openDB().then(function (db) {
+      var tx = db.transaction(DB_STORE, "readwrite");
+      var data = { graph: graph.export(), originalSizes: originalSizes };
+      tx.objectStore(DB_STORE).put(data, DB_KEY);
+    }).catch(function () {});
+  }
+
+  function scheduleSave() {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveGraph, 2000);
+  }
+
+  function loadSavedGraph() {
+    return openDB().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(DB_STORE, "readonly");
+        var req = tx.objectStore(DB_STORE).get(DB_KEY);
+        req.onsuccess = function () { resolve(req.result || null); };
+        req.onerror = function () { reject(req.error); };
+      });
+    });
+  }
+
+  function clearSavedGraph() {
+    openDB().then(function (db) {
+      var tx = db.transaction(DB_STORE, "readwrite");
+      tx.objectStore(DB_STORE).delete(DB_KEY);
+    }).catch(function () {});
+  }
 
   // ── DOM refs ───────────────────────────────────────────────────────
   const fileInput = document.getElementById("file-input");
@@ -400,6 +447,7 @@
 
     liveMode = false;
     initRenderer();
+    scheduleSave();
   }
 
   // ── Node / Edge Reducers ───────────────────────────────────────────
@@ -1311,6 +1359,7 @@
       if (fa2Idle) {
         restartFA2IfRunning();
       }
+      scheduleSave();
     }, 100);
   }
 
@@ -1325,6 +1374,20 @@
       connectLive(extIdInput.value.trim());
     }
   });
+
+  // ── Auto-restore saved graph ──────────────────────────────────────
+  loadSavedGraph().then(function (data) {
+    if (data && data.graph) {
+      graph = new Graph();
+      graph.import(data.graph);
+      originalSizes = data.originalSizes || {};
+      // Fill in any missing originalSizes
+      graph.forEachNode(function (key, attrs) {
+        if (originalSizes[key] == null) originalSizes[key] = attrs.size || 3;
+      });
+      initRenderer();
+    }
+  }).catch(function () {});
 
   // ── Util ───────────────────────────────────────────────────────────
   function escapeHtml(str) {
