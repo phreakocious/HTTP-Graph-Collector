@@ -250,6 +250,8 @@
   const extIdInput = document.getElementById("ext-id");
   const btnLive = document.getElementById("btn-live");
   const liveStatus = document.getElementById("live-status");
+  liveStatus.textContent = "Disconnected";
+  liveStatus.className = "disconnected";
 
   // ── Custom hover renderer (nullphase dark theme) ───────────────────
   function drawNodeHover(context, data, settings) {
@@ -462,6 +464,7 @@
   var fa2UseWorker = false; // whether web worker is available
   var fa2Settings = {};     // current FA2 algorithm settings
   var fa2Iters = 5;         // iterations per tick
+  var fa2LayoutGraph = null; // filtered subgraph used for layout (visible nodes only)
 
   // DOM refs for FA2 settings panel
   var fa2SettingsDiv = document.getElementById("fa2-settings");
@@ -510,6 +513,39 @@
     "  setTimeout(runLoop, 0);",
     "}"
   ].join("\n");
+
+  // Check whether a node is currently hidden by any filter
+  function isNodeHidden(key) {
+    if (manuallyHidden.has(key) && !showHidden) return true;
+    var attrs = graph.getNodeAttributes(key);
+    if (hiddenTypes.has(attrs.node_type)) return true;
+    if (hiddenDomains.has(attrs.domain)) return true;
+    if (focusSet && !focusSet.has(key)) return true;
+    return false;
+  }
+
+  // Build a subgraph containing only visible nodes for layout
+  function buildLayoutGraph() {
+    var lg = new Graph();
+    graph.forEachNode(function (key, attrs) {
+      if (!isNodeHidden(key)) {
+        lg.addNode(key, { x: attrs.x, y: attrs.y, size: attrs.size });
+      }
+    });
+    graph.forEachEdge(function (edge, attrs, source, target) {
+      if (lg.hasNode(source) && lg.hasNode(target) && !lg.hasEdge(source, target)) {
+        lg.addEdge(source, target, { weight: attrs.weight || 1 });
+      }
+    });
+    return lg;
+  }
+
+  // Copy positions from layout graph back to main graph
+  function applyLayoutPositions(lg) {
+    lg.forEachNode(function (key, attrs) {
+      graph.mergeNodeAttributes(key, { x: attrs.x, y: attrs.y });
+    });
+  }
 
   // Try to create web worker by fetching CDN libs and inlining them
   async function createFA2Worker() {
@@ -608,6 +644,15 @@
 
     readFA2Settings();
 
+    // Build filtered layout graph (visible nodes only)
+    fa2LayoutGraph = buildLayoutGraph();
+    if (fa2LayoutGraph.order === 0) {
+      fa2Running = false;
+      btnFA2.textContent = "Start ForceAtlas2";
+      btnFA2.classList.remove("active");
+      return;
+    }
+
     // Try web worker first
     if (!fa2Worker) {
       fa2Worker = await createFA2Worker();
@@ -619,10 +664,10 @@
 
       // Build ordered key list matching worker iteration order
       fa2NodeKeys = [];
-      graph.forEachNode(function (k) { fa2NodeKeys.push(k); });
+      fa2LayoutGraph.forEachNode(function (k) { fa2NodeKeys.push(k); });
 
-      // Send graph to worker
-      fa2Worker.postMessage({ type: "init", graph: graph.export() });
+      // Send filtered graph to worker
+      fa2Worker.postMessage({ type: "init", graph: fa2LayoutGraph.export() });
 
       fa2Worker.onmessage = function (e) {
         if (e.data.type === "ready") {
@@ -651,6 +696,7 @@
       fa2Worker.postMessage({ type: "stop" });
     }
     if (fa2FrameId) { cancelAnimationFrame(fa2FrameId); fa2FrameId = null; }
+    fa2LayoutGraph = null;
     btnFA2.textContent = "Start ForceAtlas2";
     btnFA2.classList.remove("active");
     fa2SettingsDiv.classList.add("hidden");
@@ -661,11 +707,20 @@
     fa2UseWorker = false;
   }
 
-  // Synchronous fallback
+  // Restart FA2 with updated filter state (rebuild layout graph)
+  function restartFA2IfRunning() {
+    if (!fa2Running) return;
+    stopFA2();
+    killFA2Worker();
+    startFA2();
+  }
+
+  // Synchronous fallback — runs on filtered layout graph
   function runFA2Sync() {
-    if (!fa2Running || fa2UseWorker) return;
+    if (!fa2Running || fa2UseWorker || !fa2LayoutGraph) return;
     readFA2Settings();
-    graphologyLibrary.layoutForceAtlas2.assign(graph, { iterations: fa2Iters, settings: fa2Settings });
+    graphologyLibrary.layoutForceAtlas2.assign(fa2LayoutGraph, { iterations: fa2Iters, settings: fa2Settings });
+    applyLayoutPositions(fa2LayoutGraph);
     if (renderer) renderer.refresh();
     fa2FrameId = requestAnimationFrame(runFA2Sync);
   }
@@ -860,6 +915,7 @@
     }
 
     if (renderer) renderer.refresh();
+    restartFA2IfRunning();
   }
 
   // ── Type Filters ───────────────────────────────────────────────────
@@ -894,6 +950,7 @@
           hiddenTypes.add(type);
         }
         if (renderer) renderer.refresh();
+        restartFA2IfRunning();
       });
     });
   }
@@ -923,6 +980,7 @@
           hiddenDomains.add(domain);
         }
         if (renderer) renderer.refresh();
+        restartFA2IfRunning();
       });
     });
 
@@ -962,6 +1020,7 @@
       renderer.getCamera().animate({ x: 0.5, y: 0.5, ratio: 1 }, { duration: 300 });
       renderer.refresh();
     }
+    restartFA2IfRunning();
   });
 
   // ── Hover ──────────────────────────────────────────────────────────
@@ -1098,12 +1157,14 @@
     contextMenu.classList.add("hidden");
     contextTarget = null;
     if (renderer) renderer.refresh();
+    restartFA2IfRunning();
   });
 
   // Show/hide hidden nodes toggle
   showHiddenCb.addEventListener("change", function () {
     showHidden = showHiddenCb.checked;
     if (renderer) renderer.refresh();
+    restartFA2IfRunning();
   });
 
   function updateHiddenCount() {
