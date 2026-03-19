@@ -21,9 +21,9 @@ Move `<span id="live-status"></span>` from after the `.btn-group` div to inside 
 
 ### CSS change (style.css)
 
-The `.btn-group` already uses `display: flex` with `gap: 4px`. Add `align-items: center` to vertically center the status text with the button.
+Add `align-items: center` to the global `.btn-group` rule (harmless for other instances since buttons are uniform height). This vertically centers the status text with the button.
 
-`#live-status` keeps its existing font-size (11px) and color classes. Remove `margin-top: 2px` since it's now inline.
+`#live-status` keeps its existing font-size (11px) and color classes. Remove `margin-top: 2px` since it's now inline. Long error messages (e.g., "chrome.runtime unavailable...") will wrap to the next line via the existing `flex-wrap: wrap` on `.btn-group`, which is acceptable.
 
 ### JS change (app.js)
 
@@ -34,7 +34,7 @@ liveStatus.textContent = "Disconnected";
 liveStatus.className = "disconnected";
 ```
 
-This should happen at initialization, before any connection attempt. When connected, the existing code already sets "Connected" with `.connected` class. When disconnecting, set back to "Disconnected" with `.disconnected` class.
+This should happen immediately after the `const liveStatus = document.getElementById("live-status")` declaration (around line 252). When connected, the existing code already sets "Connected" with `.connected` class. When disconnecting, set back to "Disconnected" with `.disconnected` class.
 
 ## Consistent Vertical Spacing
 
@@ -57,6 +57,8 @@ Change `section` gap from `6px` to `8px`.
 | `#live-status` | `margin-top` | `2px` |
 | `#graph-stats` | `margin-top` | `2px` |
 | `.fa2-mode-label` | `margin-top` | `4px` |
+| `#fa2-settings` | `margin-top` | `6px` |
+| `#show-hidden-label` | `margin-top` | `4px` |
 
 These are all replaced by the consistent `gap` values on the flex containers.
 
