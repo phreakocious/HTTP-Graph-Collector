@@ -160,8 +160,15 @@ input[type="text"]:focus {
 input[type="range"] { width: 100%; accent-color: var(--accent-cyan); }
 input[type="checkbox"] { accent-color: var(--accent-cyan); }
 
-/* Type & domain filter checkboxes */
-#type-filters, #domain-filters {
+/* Type & content filter checkboxes — horizontal wrap */
+#type-filters, #content-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+/* Domain filter checkboxes — scrollable column */
+#domain-filters {
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -169,7 +176,7 @@ input[type="checkbox"] { accent-color: var(--accent-cyan); }
   overflow-y: auto;
 }
 
-#type-filters label, #domain-filters label {
+#type-filters label, #content-filters label, #domain-filters label {
   font-size: 12px;
   display: flex;
   align-items: center;
