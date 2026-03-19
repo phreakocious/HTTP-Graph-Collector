@@ -495,11 +495,13 @@
     "var Graph = typeof graphology === 'function' ? graphology : graphology.Graph;",
     "var fa2 = graphologyLibrary.layoutForceAtlas2;",
     "var graph = null, nodeKeys = [], running = false, settings = {}, iters = 5;",
+    "var prevPos = null;",
     "self.onmessage = function(e) {",
     "  var m = e.data;",
     "  if (m.type === 'init') {",
     "    graph = new Graph(); graph.import(m.graph);",
     "    nodeKeys = []; graph.forEachNode(function(k) { nodeKeys.push(k); });",
+    "    prevPos = null;",
     "    self.postMessage({ type: 'ready', nodeCount: nodeKeys.length });",
     "  } else if (m.type === 'start') {",
     "    settings = m.settings || settings; iters = m.iters || iters;",
@@ -508,17 +510,31 @@
     "    running = false;",
     "  } else if (m.type === 'settings') {",
     "    settings = m.settings || settings; iters = m.iters || iters;",
+    "  } else if (m.type === 'resume') {",
+    "    if (!running) { running = true; runLoop(); }",
     "  }",
     "};",
     "function runLoop() {",
     "  if (!running) return;",
     "  fa2.assign(graph, { iterations: iters, settings: settings });",
     "  var buf = new Float64Array(nodeKeys.length * 2);",
+    "  var totalDisp = 0;",
     "  for (var i = 0; i < nodeKeys.length; i++) {",
     "    var a = graph.getNodeAttributes(nodeKeys[i]);",
     "    buf[i * 2] = a.x; buf[i * 2 + 1] = a.y;",
+    "    if (prevPos) {",
+    "      var dx = a.x - prevPos[i * 2], dy = a.y - prevPos[i * 2 + 1];",
+    "      totalDisp += Math.sqrt(dx * dx + dy * dy);",
+    "    }",
     "  }",
-    "  self.postMessage({ type: 'positions', buffer: buf.buffer }, [buf.buffer]);",
+    "  var avgDisp = nodeKeys.length > 0 ? totalDisp / nodeKeys.length : 0;",
+    "  prevPos = new Float64Array(buf);",
+    "  self.postMessage({ type: 'positions', buffer: buf.buffer, avgDisp: avgDisp }, [buf.buffer]);",
+    "  if (prevPos && avgDisp < 0.05) {",
+    "    running = false;",
+    "    self.postMessage({ type: 'idle' });",
+    "    return;",
+    "  }",
     "  setTimeout(runLoop, 0);",
     "}"
   ].join("\n");
@@ -689,6 +705,9 @@
             });
           }
           if (renderer) renderer.refresh();
+        } else if (e.data.type === "idle") {
+          fa2Idle = true;
+          fa2ModeLabel.textContent = "web worker (idle)";
         }
       };
     } else {
@@ -701,6 +720,7 @@
 
   function stopFA2() {
     fa2Running = false;
+    fa2Idle = false;
     if (fa2Worker && fa2UseWorker) {
       fa2Worker.postMessage({ type: "stop" });
     }
@@ -717,8 +737,11 @@
   }
 
   // Restart FA2 with updated filter state (rebuild layout graph)
+  var fa2Idle = false;
+
   function restartFA2IfRunning() {
-    if (!fa2Running) return;
+    if (!fa2Running && !fa2Idle) return;
+    fa2Idle = false;
     stopFA2();
     killFA2Worker();
     startFA2();
@@ -1285,6 +1308,10 @@
       if (renderer) {
         graphStats.textContent = graph.order + " nodes, " + graph.size + " edges";
         renderer.refresh();
+      }
+      // Wake FA2 if it went idle — new nodes need layout
+      if (fa2Idle) {
+        restartFA2IfRunning();
       }
     }, 100);
   }
