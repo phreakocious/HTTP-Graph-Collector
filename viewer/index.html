@@ -31,6 +31,17 @@
 <body>
   <div id="sidebar">
     <h1>HTTP Graph Viewer</h1>
+    <p class="hint">Visualize your browsing as a network graph using the <a href="https://chromewebstore.google.com/detail/http-graph-collector/lkkdeokncfjlinldgikoabgknklnnkoe" target="_blank">HTTP Graph Collector</a> extension. Connect live to stream requests in real time, or load a saved graph. All data stays local to your browser.</p>
+
+    <section id="live-section">
+      <h2>Live</h2>
+      <input type="text" id="ext-id" placeholder="Extension ID">
+      <div class="btn-group">
+        <button id="btn-live">Connect</button>
+        <span id="live-status">Disconnected</span>
+      </div>
+      <p class="hint">Open the extension popup and click the extension ID to copy it.</p>
+    </section>
 
     <section>
       <div class="btn-group">
@@ -41,16 +52,6 @@
         <button id="btn-clear" class="hidden">Clear</button>
       </div>
       <span id="graph-stats"></span>
-    </section>
-
-    <section id="live-section">
-      <h2>Live</h2>
-      <p class="hint">Stream requests in real time from the <a href="https://chromewebstore.google.com/detail/http-graph-collector/lkkdeokncfjlinldgikoabgknklnnkoe" target="_blank">HTTP Graph Collector</a> extension. Install it, then open its popup and click the extension ID to copy it. All data stays local to your browser.</p>
-      <input type="text" id="ext-id" placeholder="Extension ID">
-      <div class="btn-group">
-        <button id="btn-live">Connect</button>
-        <span id="live-status">Disconnected</span>
-      </div>
     </section>
 
     <section id="layout-section" class="hidden">
