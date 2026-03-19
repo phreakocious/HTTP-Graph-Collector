@@ -184,7 +184,8 @@ input[type="checkbox"] { accent-color: var(--accent-cyan); }
   cursor: pointer;
 }
 
-#type-filters label .swatch {
+#type-filters label .swatch,
+#domain-filters label .swatch {
   display: inline-block;
   width: 10px;
   height: 10px;

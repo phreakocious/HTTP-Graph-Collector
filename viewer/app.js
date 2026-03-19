@@ -543,11 +543,13 @@
     return false;
   }
 
+  var cachedSizeMult = 1, cachedSizeMin = 2, cachedSizeMax = 20;
+
   function getVisualSize(key, attrs) {
-    var mult = Number(sizeMultSlider.value) || 1;
+    var mult = cachedSizeMult;
     if (sizeMode !== "default") {
-      var minSize = Number(sizeMinSlider.value);
-      var maxSize = Number(sizeMaxSlider.value);
+      var minSize = cachedSizeMin;
+      var maxSize = cachedSizeMax;
       var v = Number(attrs.visited) || 1;
       var useLog = sizeMode === "visited-log";
       var logMax = useLog ? Math.log1p(maxVisitedCount) : maxVisitedCount;
@@ -628,6 +630,7 @@
 
   // ── ForceAtlas2 ────────────────────────────────────────────────────
   var fa2Worker = null;
+  var fa2WorkerBlobUrl = null;
   var fa2NodeKeys = null;   // ordered node keys for position mapping
   var fa2UseWorker = false; // whether web worker is available
   var fa2Settings = {};     // current FA2 algorithm settings
@@ -760,7 +763,8 @@
         "if(typeof document==='undefined'){var document={createElementNS:function(){return {}},implementation:{createDocument:function(){return {}}}};}",
       ].join("\n") + "\n";
       var blob = new Blob([domStub, codes[0], "\n", codes[1], "\n", FA2_WORKER_BODY], { type: "application/javascript" });
-      var worker = new Worker(URL.createObjectURL(blob));
+      fa2WorkerBlobUrl = URL.createObjectURL(blob);
+      var worker = new Worker(fa2WorkerBlobUrl);
       return worker;
     } catch (e) {
       console.warn("FA2 web worker creation failed, using main thread:", e);
@@ -916,6 +920,7 @@
 
   function killFA2Worker() {
     if (fa2Worker) { fa2Worker.terminate(); fa2Worker = null; }
+    if (fa2WorkerBlobUrl) { URL.revokeObjectURL(fa2WorkerBlobUrl); fa2WorkerBlobUrl = null; }
     fa2UseWorker = false;
   }
 
@@ -972,12 +977,12 @@
 
   function applySizeMode() {
     if (!graph) return;
-    var minSize = Number(sizeMinSlider.value);
-    var maxSize = Number(sizeMaxSlider.value);
-    var mult = Number(sizeMultSlider.value);
-    sizeMinVal.textContent = minSize;
-    sizeMaxVal.textContent = maxSize;
-    sizeMultVal.textContent = mult.toFixed(1);
+    cachedSizeMin = Number(sizeMinSlider.value);
+    cachedSizeMax = Number(sizeMaxSlider.value);
+    cachedSizeMult = Number(sizeMultSlider.value) || 1;
+    sizeMinVal.textContent = cachedSizeMin;
+    sizeMaxVal.textContent = cachedSizeMax;
+    sizeMultVal.textContent = cachedSizeMult.toFixed(1);
 
     [btnSizeDefault, btnSizeVisited, btnSizeVisitedLog].forEach(function (b) { b.classList.remove("active"); });
 
@@ -1267,7 +1272,12 @@
       cb.type = "checkbox";
       cb.checked = !hiddenDomains.has(domain);
       cb.dataset.domain = domain;
+      var swatch = document.createElement("span");
+      swatch.className = "swatch";
+      var c = stringToColor(domain);
+      swatch.style.background = "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
       label.appendChild(cb);
+      label.appendChild(swatch);
       label.appendChild(document.createTextNode(" " + domain));
       label.dataset.domain = domain;
       if (domainFilterText && !domain.toLowerCase().includes(domainFilterText)) {
