@@ -108,14 +108,18 @@
       }
       return;
     }
-    var px, py;
+    var px, py, anchor;
     if (parentId && this.graph.hasNode(parentId)) {
-      var pa = this.graph.getNodeAttributes(parentId);
-      px = pa.x + (Math.random() - 0.5) * 50;
-      py = pa.y + (Math.random() - 0.5) * 50;
+      anchor = this.graph.getNodeAttributes(parentId);
+    } else if (this.graph.hasNode("client:localhost")) {
+      anchor = this.graph.getNodeAttributes("client:localhost");
+    }
+    if (anchor) {
+      px = anchor.x + (Math.random() - 0.5) * 50;
+      py = anchor.y + (Math.random() - 0.5) * 50;
     } else {
-      px = (Math.random() - 0.5) * 1000;
-      py = (Math.random() - 0.5) * 1000;
+      px = (Math.random() - 0.5) * 100;
+      py = (Math.random() - 0.5) * 100;
     }
     var color = domain === "localdomain" ? COLOR_LOCALDOMAIN : this.assignColor(domain);
     var nodeAttrs = {
