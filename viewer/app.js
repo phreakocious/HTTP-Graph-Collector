@@ -25,19 +25,30 @@
   initTheme();
 
   // ── Live Graph Builder ───────────────────────────────────────────
-  function hsvToRgb(h, s, v) {
-    var i = Math.floor(h * 6), f = h * 6 - i;
-    var p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
-    var r, g, b;
-    switch (i % 6) {
-      case 0: r = v; g = t; b = p; break;
-      case 1: r = q; g = v; b = p; break;
-      case 2: r = p; g = v; b = t; break;
-      case 3: r = p; g = q; b = v; break;
-      case 4: r = t; g = p; b = v; break;
-      case 5: r = v; g = p; b = q; break;
-    }
-    return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+  var PALETTE_GRADIENT = [
+    [0, 240, 255],    // Cyan
+    [45, 120, 255],   // Blue
+    [138, 43, 226],   // Purple
+    [255, 0, 128],    // Pink
+    [255, 80, 0],     // Orange
+    [255, 215, 0]     // Yellow
+  ];
+
+  function interpolateColor(color1, color2, factor) {
+    return [
+      Math.round(color1[0] + factor * (color2[0] - color1[0])),
+      Math.round(color1[1] + factor * (color2[1] - color1[1])),
+      Math.round(color1[2] + factor * (color2[2] - color1[2]))
+    ];
+  }
+
+  function getGradientColor(t) {
+    var segments = PALETTE_GRADIENT.length - 1;
+    var scaled = t * segments;
+    var index = Math.floor(scaled);
+    var factor = scaled - index;
+    if (index >= segments) return PALETTE_GRADIENT[segments];
+    return interpolateColor(PALETTE_GRADIENT[index], PALETTE_GRADIENT[index + 1], factor);
   }
 
   function stringToColor(str) {
@@ -45,8 +56,8 @@
     for (var i = 0; i < str.length; i++) {
       hash = str.charCodeAt(i) + ((hash << 5) - hash);
     }
-    var h = ((hash % 360) + 360) % 360;
-    return hsvToRgb(h / 360, 0.60, 0.80);
+    var t = Math.abs(hash % 1000) / 1000;
+    return getGradientColor(t);
   }
 
   var MULTI_TLDS = new Set([
@@ -65,8 +76,8 @@
     return parts.slice(-2).join(".") + ".";
   }
 
-  var COLOR_LOCALDOMAIN = [236, 236, 236];
-  var COLOR_DEFAULT = [212, 212, 212];
+  var COLOR_LOCALDOMAIN = [0, 255, 204]; // Neon Mint
+  var COLOR_DEFAULT = [113, 10, 255]; // Electric Purple
   var MAXLABEL = 32;
 
   function LiveGraphBuilder(g) {
@@ -596,6 +607,32 @@
     return res;
   }
 
+  function toRGBA(col, alpha) {
+    var r = 113, g = 10, b = 255;
+    if (col) {
+      if (col.startsWith("rgba(") || col.startsWith("rgb(")) {
+        var parts = col.match(/\d+/g);
+        if (parts && parts.length >= 3) {
+          r = parseInt(parts[0]);
+          g = parseInt(parts[1]);
+          b = parseInt(parts[2]);
+        }
+      } else if (col.startsWith("#") && col.length === 7) {
+        r = parseInt(col.substring(1, 3), 16);
+        g = parseInt(col.substring(3, 5), 16);
+        b = parseInt(col.substring(5, 7), 16);
+      }
+    }
+    // Manually mix with the page background color (#0d0221 / rgb(13, 2, 33)) 
+    // to simulate opacity without relying on WebGL alpha blending.
+    // This prevents bright hairballs where overlapping transparent edges add up to white.
+    var bgR = 13, bgG = 2, bgB = 33;
+    var finalR = Math.round(r * alpha + bgR * (1 - alpha));
+    var finalG = Math.round(g * alpha + bgG * (1 - alpha));
+    var finalB = Math.round(b * alpha + bgB * (1 - alpha));
+    return "rgb(" + finalR + "," + finalG + "," + finalB + ")";
+  }
+
   function edgeReducer(edge, attrs) {
     var res = Object.assign({}, attrs);
     var source = graph.source(edge);
@@ -614,21 +651,22 @@
     if (focusSet && (!focusSet.has(source) || !focusSet.has(target))) { res.hidden = true; return res; }
 
     var isCrossDomain = (sAttrs.domain && tAttrs.domain && sAttrs.domain !== tAttrs.domain && sAttrs.node_type !== 'client' && tAttrs.node_type !== 'client');
+    var sColor = sAttrs.color || theme.border;
 
     // Hover dimming
     if (hoveredNode && source !== hoveredNode && target !== hoveredNode) {
       res.color = theme.bgPage;
       res.zIndex = 0;
     } else if (hoveredNode) {
-      res.color = theme.textPrimary + "A0";
+      res.color = toRGBA(sColor, 0.6);
       res.size = res.size ? res.size * 1.2 : 1.5;
       res.zIndex = 1;
     } else {
       if (isCrossDomain) {
-        res.color = theme.textMuted + "40";
+        res.color = toRGBA(sColor, 0.25);
         res.zIndex = 1;
       } else {
-        res.color = theme.border + "50";
+        res.color = toRGBA(sColor, 0.08);
         res.zIndex = 0;
       }
     }
