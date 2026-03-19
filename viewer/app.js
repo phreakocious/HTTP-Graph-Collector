@@ -526,9 +526,10 @@
 
     // Hover dimming
     if (hoveredNode && source !== hoveredNode && target !== hoveredNode) {
-      res.color = "#0d1117";
+      res.color = "#0d0221";
       res.zIndex = 0;
     } else if (hoveredNode) {
+      res.color = "#b967ff";
       res.zIndex = 1;
     }
 
