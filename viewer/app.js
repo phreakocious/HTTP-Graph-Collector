@@ -277,6 +277,7 @@
   // ── DOM refs ───────────────────────────────────────────────────────
   const fileInput = document.getElementById("file-input");
   const btnExport = document.getElementById("btn-export");
+  const btnClear = document.getElementById("btn-clear");
   const graphStats = document.getElementById("graph-stats");
   const layoutSection = document.getElementById("layout-section");
   const btnFA2 = document.getElementById("btn-fa2");
@@ -363,6 +364,24 @@
     URL.revokeObjectURL(url);
   });
 
+  btnClear.addEventListener("click", function () {
+    disconnectLive();
+    stopFA2();
+    killFA2Worker();
+    if (renderer) { renderer.kill(); renderer = null; }
+    graph = null;
+    originalSizes = {};
+    clearSavedGraph();
+    graphStats.textContent = "";
+    btnExport.classList.add("hidden");
+    btnClear.classList.add("hidden");
+    layoutSection.classList.add("hidden");
+    document.getElementById("size-section").classList.add("hidden");
+    searchSection.classList.add("hidden");
+    focusSection.classList.add("hidden");
+    filterSection.classList.add("hidden");
+  });
+
   function initRenderer(opts) {
     opts = opts || {};
     if (renderer) { renderer.kill(); renderer = null; }
@@ -393,6 +412,7 @@
       });
 
       btnExport.classList.remove("hidden");
+      btnClear.classList.remove("hidden");
       layoutSection.classList.remove("hidden");
       document.getElementById("size-section").classList.remove("hidden");
       searchSection.classList.remove("hidden");
