@@ -79,6 +79,13 @@
     if (this.graph.hasNode(nodeId)) {
       var v = this.graph.getNodeAttribute(nodeId, "visited") || 1;
       this.graph.setNodeAttribute(nodeId, "visited", v + 1);
+      // Backfill attrs on nodes created bare (e.g. via ensureHierarchy)
+      if (attrs) {
+        var cur = this.graph.getNodeAttributes(nodeId);
+        for (var k in attrs) {
+          if (attrs[k] && !cur[k]) this.graph.setNodeAttribute(nodeId, k, attrs[k]);
+        }
+      }
       return;
     }
     var px, py;
@@ -231,6 +238,7 @@
   let livePort = null;
   let liveRefreshTimer = null;
   let liveMode = false;
+  let graphGrew = false;
   let saveTimer = null;
 
   // ── IndexedDB persistence ─────────────────────────────────────────
@@ -426,7 +434,7 @@
       focusSection.classList.remove("hidden");
       filterSection.classList.remove("hidden");
 
-      graphStats.textContent = graph.order + " nodes, " + graph.size + " edges";
+      updateStats();
 
       setupSearch();
       setupTypeFilters();
@@ -479,26 +487,22 @@
   }
 
   // ── Node / Edge Reducers ───────────────────────────────────────────
+  function isNodeHidden(key, attrs) {
+    if (manuallyHidden.has(key) && !showHidden) return true;
+    if (hiddenTypes.has(attrs.node_type)) return true;
+    if (hiddenDomains.has(attrs.domain)) return true;
+    if (hiddenContentGroups.size > 0 && attrs.node_type === "resource" && attrs.content_type) {
+      if (hiddenContentGroups.has(classifyContent(attrs.content_type))) return true;
+    }
+    if (focusSet && !focusSet.has(key)) return true;
+    return false;
+  }
+
   function nodeReducer(key, attrs) {
     var res = Object.assign({}, attrs);
 
-    // Manually hidden nodes
-    if (manuallyHidden.has(key) && !showHidden) { res.hidden = true; return res; }
+    if (isNodeHidden(key, attrs)) { res.hidden = true; return res; }
     if (manuallyHidden.has(key) && showHidden) { res.color = "#30363d"; }
-
-    // Type filter
-    if (hiddenTypes.has(attrs.node_type)) { res.hidden = true; return res; }
-
-    // Domain filter
-    if (hiddenDomains.has(attrs.domain)) { res.hidden = true; return res; }
-
-    // Content group filter
-    if (hiddenContentGroups.size > 0 && attrs.node_type === "resource" && attrs.content_type) {
-      if (hiddenContentGroups.has(classifyContent(attrs.content_type))) { res.hidden = true; return res; }
-    }
-
-    // Focus mode
-    if (focusSet && !focusSet.has(key)) { res.hidden = true; return res; }
 
     // Hover dimming
     if (hoveredNode && hoveredNode !== key && !graph.areNeighbors(hoveredNode, key)) {
@@ -1082,6 +1086,7 @@
         } else {
           hiddenTypes.add(type);
         }
+        updateStats();
         if (renderer) renderer.refresh();
         restartFA2IfRunning();
       });
@@ -1139,6 +1144,7 @@
         } else {
           hiddenContentGroups.add(group);
         }
+        updateStats();
         if (renderer) renderer.refresh();
         restartFA2IfRunning();
       });
@@ -1172,6 +1178,7 @@
         } else {
           hiddenDomains.add(domain);
         }
+        updateStats();
         if (renderer) renderer.refresh();
         restartFA2IfRunning();
       });
@@ -1209,6 +1216,7 @@
     domainFiltersDiv.querySelectorAll("label").forEach(function (lbl) { lbl.style.display = ""; });
 
     infoPanel.classList.add("hidden");
+    updateStats();
     if (renderer) {
       renderer.getCamera().animate({ x: 0.5, y: 0.5, ratio: 1 }, { duration: 300 });
       renderer.refresh();
@@ -1369,6 +1377,20 @@
     }
   }
 
+  function updateStats() {
+    if (!graph) { graphStats.textContent = ""; return; }
+    var total = graph.order;
+    var visible = 0;
+    graph.forEachNode(function (key, attrs) {
+      if (!isNodeHidden(key, attrs)) visible++;
+    });
+    if (visible === total) {
+      graphStats.textContent = total + " nodes, " + graph.size + " edges";
+    } else {
+      graphStats.textContent = visible + " / " + total + " nodes, " + graph.size + " edges";
+    }
+  }
+
   // ── Live Mode ────────────────────────────────────────────────────
   extIdInput.value = localStorage.getItem("httpgraph-ext-id") || "";
 
@@ -1408,7 +1430,16 @@
     }
 
     livePort.onMessage.addListener(function (msg) {
+      var before = graph.order;
       liveBuilder.processRecord(msg);
+      if (graph.order > before && msg.url) {
+        try {
+          var p = new URL(msg.url);
+          var rid = p.hostname + p.pathname;
+          if (graph.hasNode(rid) && !isNodeHidden(rid, graph.getNodeAttributes(rid)))
+            graphGrew = true;
+        } catch (e) {}
+      }
       scheduleLiveRefresh();
     });
 
@@ -1450,18 +1481,19 @@
     if (liveRefreshTimer) return;
     liveRefreshTimer = setTimeout(function () {
       liveRefreshTimer = null;
+      updateStats();
       if (renderer) {
-        graphStats.textContent = graph.order + " nodes, " + graph.size + " edges";
         setupSearch();
         setupTypeFilters();
         setupContentFilters();
         setupDomainFilters();
         renderer.refresh();
       }
-      // Wake FA2 if it went idle — new nodes need layout
-      if (fa2Idle) {
+      // Wake FA2 only if new nodes were actually added
+      if (fa2Idle && graphGrew) {
         restartFA2IfRunning();
       }
+      graphGrew = false;
       scheduleSave();
     }, 100);
   }
