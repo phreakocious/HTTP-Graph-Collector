@@ -530,7 +530,7 @@
     "  var avgDisp = nodeKeys.length > 0 ? totalDisp / nodeKeys.length : 0;",
     "  prevPos = new Float64Array(buf);",
     "  self.postMessage({ type: 'positions', buffer: buf.buffer, avgDisp: avgDisp }, [buf.buffer]);",
-    "  if (prevPos && avgDisp < 0.05) {",
+    "  if (prevPos && avgDisp < 0.5) {",
     "    running = false;",
     "    self.postMessage({ type: 'idle' });",
     "    return;",
@@ -707,7 +707,13 @@
           if (renderer) renderer.refresh();
         } else if (e.data.type === "idle") {
           fa2Idle = true;
-          fa2ModeLabel.textContent = "web worker (idle)";
+          fa2Running = false;
+          killFA2Worker();
+          fa2LayoutGraph = null;
+          btnFA2.textContent = "Start ForceAtlas2";
+          btnFA2.classList.remove("active");
+          fa2ModeLabel.textContent = "idle — settled";
+          fa2SettingsDiv.classList.remove("hidden");
         }
       };
     } else {
