@@ -542,6 +542,7 @@
   var fa2UseWorker = false; // whether web worker is available
   var fa2Settings = {};     // current FA2 algorithm settings
   var fa2Iters = 5;         // iterations per tick
+  var fa2SettleThreshold = 0.5; // avg displacement to go idle
   var fa2LayoutGraph = null; // filtered subgraph used for layout (visible nodes only)
 
   // DOM refs for FA2 settings panel
@@ -551,6 +552,8 @@
   var fa2SlowdownSlider = document.getElementById("fa2-slowdown");
   var fa2ThetaSlider = document.getElementById("fa2-theta");
   var fa2ItersSlider = document.getElementById("fa2-iters");
+  var fa2SettleSlider = document.getElementById("fa2-settle");
+  var fa2SettleVal = document.getElementById("fa2-settle-val");
   var fa2BHCheck = document.getElementById("fa2-barneshut");
   var fa2SGCheck = document.getElementById("fa2-stronggrav");
   var fa2LLCheck = document.getElementById("fa2-linlog");
@@ -563,7 +566,7 @@
   var FA2_WORKER_BODY = [
     "var Graph = typeof graphology === 'function' ? graphology : graphology.Graph;",
     "var fa2 = graphologyLibrary.layoutForceAtlas2;",
-    "var graph = null, nodeKeys = [], running = false, settings = {}, iters = 5;",
+    "var graph = null, nodeKeys = [], running = false, settings = {}, iters = 5, settleThreshold = 0.5;",
     "var prevPos = null;",
     "self.onmessage = function(e) {",
     "  var m = e.data;",
@@ -573,12 +576,12 @@
     "    prevPos = null;",
     "    self.postMessage({ type: 'ready', nodeCount: nodeKeys.length });",
     "  } else if (m.type === 'start') {",
-    "    settings = m.settings || settings; iters = m.iters || iters;",
+    "    settings = m.settings || settings; iters = m.iters || iters; if (m.settleThreshold != null) settleThreshold = m.settleThreshold;",
     "    running = true; runLoop();",
     "  } else if (m.type === 'stop') {",
     "    running = false;",
     "  } else if (m.type === 'settings') {",
-    "    settings = m.settings || settings; iters = m.iters || iters;",
+    "    settings = m.settings || settings; iters = m.iters || iters; if (m.settleThreshold != null) settleThreshold = m.settleThreshold;",
     "  } else if (m.type === 'resume') {",
     "    if (!running) { running = true; runLoop(); }",
     "  }",
@@ -599,7 +602,7 @@
     "  var avgDisp = nodeKeys.length > 0 ? totalDisp / nodeKeys.length : 0;",
     "  prevPos = new Float64Array(buf);",
     "  self.postMessage({ type: 'positions', buffer: buf.buffer, avgDisp: avgDisp }, [buf.buffer]);",
-    "  if (prevPos && avgDisp < 0.5) {",
+    "  if (prevPos && avgDisp < settleThreshold) {",
     "    running = false;",
     "    self.postMessage({ type: 'idle' });",
     "    return;",
@@ -699,6 +702,7 @@
     document.getElementById("fa2-slowdown-val").textContent = fa2SlowdownSlider.value;
     document.getElementById("fa2-theta-val").textContent = (fa2ThetaSlider.value / 10).toFixed(1);
     document.getElementById("fa2-iters-val").textContent = fa2ItersSlider.value;
+    fa2SettleVal.textContent = Number(fa2SettleSlider.value).toFixed(1);
   }
 
   function readFA2Settings() {
@@ -710,6 +714,7 @@
     fa2Settings.strongGravityMode = fa2SGCheck.checked;
     fa2Settings.linLogMode = fa2LLCheck.checked;
     fa2Iters = Number(fa2ItersSlider.value);
+    fa2SettleThreshold = Number(fa2SettleSlider.value);
     updateFA2Labels();
   }
 
@@ -717,12 +722,12 @@
   function pushFA2Settings() {
     readFA2Settings();
     if (fa2Running && fa2UseWorker && fa2Worker) {
-      fa2Worker.postMessage({ type: "settings", settings: fa2Settings, iters: fa2Iters });
+      fa2Worker.postMessage({ type: "settings", settings: fa2Settings, iters: fa2Iters, settleThreshold: fa2SettleThreshold });
     }
   }
 
   // Bind all FA2 settings controls
-  [fa2ScalingSlider, fa2GravitySlider, fa2SlowdownSlider, fa2ThetaSlider, fa2ItersSlider].forEach(function (el) {
+  [fa2ScalingSlider, fa2GravitySlider, fa2SlowdownSlider, fa2ThetaSlider, fa2ItersSlider, fa2SettleSlider].forEach(function (el) {
     el.addEventListener("input", pushFA2Settings);
   });
   [fa2BHCheck, fa2SGCheck, fa2LLCheck].forEach(function (el) {
@@ -765,7 +770,7 @@
 
       fa2Worker.onmessage = function (e) {
         if (e.data.type === "ready") {
-          fa2Worker.postMessage({ type: "start", settings: fa2Settings, iters: fa2Iters });
+          fa2Worker.postMessage({ type: "start", settings: fa2Settings, iters: fa2Iters, settleThreshold: fa2SettleThreshold });
         } else if (e.data.type === "positions") {
           var buf = new Float64Array(e.data.buffer);
           for (var i = 0; i < fa2NodeKeys.length; i++) {
