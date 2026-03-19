@@ -1212,8 +1212,11 @@
     stopFA2();
     killFA2Worker();
 
-    graph = new Graph();
-    originalSizes = {};
+    // Reuse existing graph if one is loaded (e.g. from GEXF), otherwise create new
+    if (!graph) {
+      graph = new Graph();
+      originalSizes = {};
+    }
     liveBuilder = new LiveGraphBuilder(graph);
     liveMode = true;
 
@@ -1247,7 +1250,10 @@
     btnLive.textContent = "Disconnect";
     btnLive.classList.add("active");
 
-    initRenderer({ autoStartFA2: false });
+    // Only create renderer if one doesn't exist (graph already loaded)
+    if (!renderer) {
+      initRenderer({ autoStartFA2: false });
+    }
 
     // Periodically refresh filters/search for newly arrived nodes
     liveFilterTimer = setInterval(function () {
