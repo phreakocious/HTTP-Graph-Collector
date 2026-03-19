@@ -1409,13 +1409,18 @@
       graph = new Graph();
       graph.import(data.graph);
       originalSizes = data.originalSizes || {};
-      // Fill in any missing originalSizes
       graph.forEachNode(function (key, attrs) {
         if (originalSizes[key] == null) originalSizes[key] = attrs.size || 3;
       });
       initRenderer();
     }
-  }).catch(function () {});
+  }).catch(function () {}).finally(function () {
+    // Auto-connect if extension ID is saved
+    var savedId = extIdInput.value.trim();
+    if (savedId) {
+      connectLive(savedId);
+    }
+  });
 
   // ── Util ───────────────────────────────────────────────────────────
   function escapeHtml(str) {
