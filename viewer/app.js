@@ -331,14 +331,14 @@
       var x = data.x + size + 3;
       var y = data.y + fontSize / 3;
       var pad = 3;
-      context.fillStyle = "#161b22E0";
+      context.fillStyle = "#150533E0";
       context.beginPath();
       context.roundRect(x - pad, data.y - fontSize / 2 - pad, textWidth + pad * 2, fontSize + pad * 2, 3);
       context.fill();
-      context.strokeStyle = "#30363d";
+      context.strokeStyle = "#3d1a7a";
       context.lineWidth = 1;
       context.stroke();
-      context.fillStyle = "#f0f6fc";
+      context.fillStyle = "#f0e6ff";
       context.fillText(data.label, x, y);
     }
   }
@@ -405,8 +405,9 @@
         edgeReducer: edgeReducer,
         allowInvalidContainer: true,
         labelRenderedSizeThreshold: 6,
-        labelColor: { color: "#f0f6fc" },
-        defaultEdgeColor: "#30363d",
+        labelFont: "Oxanium, sans-serif",
+        labelColor: { color: "#f0e6ff" },
+        defaultEdgeColor: "#3d1a7a",
         defaultEdgeType: "arrow",
         defaultDrawNodeHover: drawNodeHover,
       });
