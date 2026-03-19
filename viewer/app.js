@@ -114,6 +114,10 @@
       this.edgeWeights[key]++;
       var edges = this.graph.edges(srcId, dstId);
       if (edges.length > 0) this.graph.setEdgeAttribute(edges[0], "weight", this.edgeWeights[key]);
+    } else if (this.graph.hasEdge(srcId, dstId)) {
+      var existing = this.graph.edges(srcId, dstId);
+      this.edgeWeights[key] = (this.graph.getEdgeAttribute(existing[0], "weight") || 1) + 1;
+      this.graph.setEdgeAttribute(existing[0], "weight", this.edgeWeights[key]);
     } else {
       this.edgeWeights[key] = 1;
       this.graph.addEdge(srcId, dstId, { weight: 1 });
@@ -1415,10 +1419,10 @@
       initRenderer();
     }
   }).catch(function () {}).finally(function () {
-    // Auto-connect if extension ID is saved
+    // Auto-connect if extension ID is saved (delay for chrome.runtime availability)
     var savedId = extIdInput.value.trim();
     if (savedId) {
-      connectLive(savedId);
+      setTimeout(function () { connectLive(savedId); }, 500);
     }
   });
 
