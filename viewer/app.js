@@ -508,6 +508,8 @@
   const domainFiltersDiv = document.getElementById("domain-filters");
   const btnReset = document.getElementById("btn-reset");
   const infoPanel = document.getElementById("info-panel");
+  const infoHeader = document.getElementById("info-header");
+  const infoClose = document.getElementById("info-close");
   const infoContent = document.getElementById("info-content");
   const tooltip = document.getElementById("tooltip");
   const contextMenu = document.getElementById("context-menu");
@@ -521,6 +523,31 @@
   const liveStatus = document.getElementById("live-status");
   liveStatus.textContent = "Disconnected";
   liveStatus.className = "disconnected";
+
+  // ── Draggable info panel ──────────────────────────────────────────
+  (function () {
+    var dragging = false, offX = 0, offY = 0;
+    infoHeader.addEventListener("mousedown", function (e) {
+      if (e.target === infoClose) return;
+      dragging = true;
+      var rect = infoPanel.getBoundingClientRect();
+      offX = e.clientX - rect.left;
+      offY = e.clientY - rect.top;
+      e.preventDefault();
+    });
+    document.addEventListener("mousemove", function (e) {
+      if (!dragging) return;
+      infoPanel.style.left = (e.clientX - offX) + "px";
+      infoPanel.style.top = (e.clientY - offY) + "px";
+      infoPanel.style.right = "auto";
+    });
+    document.addEventListener("mouseup", function () { dragging = false; });
+    infoClose.addEventListener("click", function () {
+      infoPanel.classList.add("hidden");
+      selectedNode = null;
+      if (renderer) renderer.refresh();
+    });
+  })();
 
   // ── Custom hover renderer (nullphase dark theme) ───────────────────
   function drawNodeHover(context, data, settings) {
@@ -1731,12 +1758,6 @@
     renderer.on("clickNode", function (event) {
       selectedNode = event.node;
       showNodeInfo(event.node);
-      renderer.refresh();
-    });
-
-    renderer.on("clickStage", function () {
-      selectedNode = null;
-      infoPanel.classList.add("hidden");
       renderer.refresh();
     });
   }

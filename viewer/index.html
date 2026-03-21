@@ -145,13 +145,17 @@
       <label id="show-hidden-label" class="hidden" data-tip="Reveal nodes you hid via right-click, shown in gray"><input type="checkbox" id="show-hidden"> Show hidden nodes (<span id="hidden-count">0</span>)</label>
     </section>
 
-    <section id="info-panel" class="hidden">
-      <h2>Node Info</h2>
-      <div id="info-content"></div>
-    </section>
   </div>
 
   <div id="graph-container"></div>
+
+  <div id="info-panel" class="hidden">
+    <div id="info-header">
+      <h2>Node Info</h2>
+      <span id="info-close">&times;</span>
+    </div>
+    <div id="info-content"></div>
+  </div>
   <div id="ui-tip"></div>
   <div id="tooltip" class="hidden"></div>
   <div id="context-menu" class="hidden"></div>
