@@ -148,7 +148,7 @@
     originalSizes[nodeId] = size;
   };
 
-  LiveGraphBuilder.prototype.addEdge = function (srcId, dstId) {
+  LiveGraphBuilder.prototype.addEdge = function (srcId, dstId, attrs) {
     if (srcId === dstId) return;
     if (!this.graph.hasNode(srcId) || !this.graph.hasNode(dstId)) return;
     var key = srcId + "\t" + dstId;
@@ -162,7 +162,9 @@
       this.graph.setEdgeAttribute(existing[0], "weight", this.edgeWeights[key]);
     } else {
       this.edgeWeights[key] = 1;
-      this.graph.addEdge(srcId, dstId, { weight: 1 });
+      var edgeAttrs = { weight: 1 };
+      if (attrs) Object.assign(edgeAttrs, attrs);
+      this.graph.addEdge(srcId, dstId, edgeAttrs);
     }
   };
 
@@ -186,7 +188,15 @@
     if (record.edge_type === "redirect") {
       var srcRes = this.ensureHierarchy(record.url);
       var dstRes = this.ensureHierarchy(record.redirect_url);
-      if (srcRes && dstRes) this.addEdge(srcRes, dstRes);
+      if (srcRes && dstRes) {
+        this.addEdge(srcRes, dstRes, {
+          edge_type: "redirect",
+          status_code: record.status || 0,
+        });
+        // Track redirect chain: srcRes → dstRes
+        redirectNext[srcRes] = dstRes;
+        if (!redirectPrev[dstRes]) redirectPrev[dstRes] = srcRes;
+      }
       return;
     }
 
@@ -270,6 +280,30 @@
   let domainFilterText = "";
   let manuallyHidden = new Set(); // nodes hidden via right-click
   let showHidden = false;         // toggle to reveal manually hidden nodes
+  let redirectNext = {};          // resourceId → next resourceId in redirect chain
+  let redirectPrev = {};          // resourceId → prev resourceId in redirect chain
+
+  function getRedirectChain(nodeKey) {
+    if (!redirectNext[nodeKey] && !redirectPrev[nodeKey]) return [];
+    // Walk back to chain start
+    var start = nodeKey;
+    var seen = new Set();
+    while (redirectPrev[start] && !seen.has(start)) {
+      seen.add(start);
+      start = redirectPrev[start];
+    }
+    // Walk forward to build chain
+    var chain = [start];
+    seen.clear();
+    seen.add(start);
+    var cur = start;
+    while (redirectNext[cur] && !seen.has(redirectNext[cur])) {
+      cur = redirectNext[cur];
+      seen.add(cur);
+      chain.push(cur);
+    }
+    return chain;
+  }
   let originalSizes = {};         // node key → original viz size
   let sizeMode = "default";       // "default" | "visited" | "visited-log"
   let bundleEnabled = true;       // collapse host resources into bundle nodes
@@ -586,14 +620,20 @@
     renderedContentGroups.clear(); contentFiltersDiv.innerHTML = "";
     renderedDomains.clear(); domainFiltersDiv.innerHTML = "";
     expandedHosts.clear();
+    redirectNext = {};
+    redirectPrev = {};
     rebuildBundles();
     updateHiddenCount();
 
     requestAnimationFrame(function () {
       var SigmaConstructor = typeof Sigma === "function" ? Sigma : Sigma.Sigma;
+      if (!EdgeDashedProgram) EdgeDashedProgram = initEdgeDashedProgram();
+      var programClasses = {};
+      if (EdgeDashedProgram) programClasses.dashed = EdgeDashedProgram;
       renderer = new SigmaConstructor(graph, container, {
         nodeReducer: nodeReducer,
         edgeReducer: edgeReducer,
+        edgeProgramClasses: programClasses,
         allowInvalidContainer: true,
         labelRenderedSizeThreshold: 6,
         labelFont: "Oxanium, sans-serif",
@@ -655,10 +695,19 @@
 
     originalSizes = {};
     maxVisitedCount = 1;
+    redirectNext = {};
+    redirectPrev = {};
     graph.forEachNode(function (key, attrs) {
       originalSizes[key] = attrs.size || 3;
       var v = Number(attrs.visited) || 1;
       if (v > maxVisitedCount) maxVisitedCount = v;
+    });
+    // Rebuild redirect chains from edge attributes
+    graph.forEachEdge(function (edge, attrs, source, target) {
+      if (attrs.edge_type === "redirect") {
+        redirectNext[source] = target;
+        if (!redirectPrev[target]) redirectPrev[target] = source;
+      }
     });
 
     liveMode = false;
@@ -770,6 +819,7 @@
     if (focusSet && (!focusSet.has(source) || !focusSet.has(target))) { res.hidden = true; return res; }
 
     var isCrossDomain = (sAttrs.domain && tAttrs.domain && sAttrs.domain !== tAttrs.domain && sAttrs.node_type !== 'client' && tAttrs.node_type !== 'client');
+    var isRedirect = attrs.edge_type === "redirect";
     var sColor = sAttrs.color || theme.border;
 
     // Hover dimming
@@ -777,9 +827,14 @@
       res.color = theme.bgPage;
       res.zIndex = 0;
     } else if (hoveredNode) {
-      res.color = toRGBA(sColor, 0.6);
+      res.color = isRedirect ? theme.accentYellow : toRGBA(sColor, 0.6);
       res.size = res.size ? res.size * 1.2 : 1.5;
       res.zIndex = 1;
+    } else if (isRedirect) {
+      res.color = toRGBA(theme.accentYellow, 0.7);
+      res.size = 2;
+      res.zIndex = 2;
+      if (EdgeDashedProgram) res.type = "dashed";
     } else {
       if (isCrossDomain) {
         res.color = toRGBA(sColor, 0.25);
@@ -791,6 +846,114 @@
     }
 
     return res;
+  }
+
+  // ── Dashed Edge Program (WebGL) ──────────────────────────────────
+  // Custom sigma edge program that renders dashed lines for redirects.
+  // Extends EdgeRectangleProgram with modified shaders that add a
+  // dash pattern based on position along the edge.
+
+  var EdgeDashedProgram = null;
+
+  function initEdgeDashedProgram() {
+    var SigmaNs = typeof Sigma === "object" ? Sigma : {};
+    var Base = SigmaNs.EdgeRectangleProgram;
+    if (!Base) return null;
+
+    var DASH_VERT = [
+      "attribute vec4 a_id;",
+      "attribute vec4 a_color;",
+      "attribute vec2 a_normal;",
+      "attribute float a_normalCoef;",
+      "attribute vec2 a_positionStart;",
+      "attribute vec2 a_positionEnd;",
+      "attribute float a_positionCoef;",
+      "",
+      "uniform mat3 u_matrix;",
+      "uniform float u_sizeRatio;",
+      "uniform float u_zoomRatio;",
+      "uniform float u_pixelRatio;",
+      "uniform float u_correctionRatio;",
+      "uniform float u_minEdgeThickness;",
+      "uniform float u_feather;",
+      "",
+      "varying vec4 v_color;",
+      "varying vec2 v_normal;",
+      "varying float v_thickness;",
+      "varying float v_feather;",
+      "varying float v_dash;",
+      "",
+      "const float minThickness = 1.7;",
+      "",
+      "void main(void) {",
+      "  #ifdef PICKING_MODE",
+      "  v_color = a_id;",
+      "  #else",
+      "  v_color = a_color;",
+      "  #endif",
+      "  v_color.a *= u_correctionRatio;",
+      "  v_normal = a_normal;",
+      "",
+      "  vec2 position = a_positionStart * (1.0 - a_positionCoef) + a_positionEnd * a_positionCoef;",
+      "  vec2 startScreen = (u_matrix * vec3(a_positionStart, 1.0)).xy;",
+      "  vec2 endScreen = (u_matrix * vec3(a_positionEnd, 1.0)).xy;",
+      "  float edgeLen = length(endScreen - startScreen) * 0.5 * u_pixelRatio;",
+      "  v_dash = a_positionCoef * edgeLen;",
+      "",
+      "  float normalLength = a_normal.x;",
+      "  float thickness = max(u_minEdgeThickness, u_sizeRatio * u_correctionRatio);",
+      "  v_thickness = max(thickness, minThickness);",
+      "  v_feather = u_feather * u_pixelRatio;",
+      "",
+      "  vec2 normal = vec2(-(a_positionEnd.y - a_positionStart.y), a_positionEnd.x - a_positionStart.x);",
+      "  normal = normalize(normal);",
+      "  vec2 offsetDir = normal * a_normalCoef * (v_thickness + v_feather) / 2.0 / u_sizeRatio;",
+      "",
+      "  vec3 p = u_matrix * vec3(position + offsetDir, 1.0);",
+      "  gl_Position = vec4(p.xy, 0.0, 1.0);",
+      "}",
+    ].join("\n");
+
+    var DASH_FRAG = [
+      "precision mediump float;",
+      "",
+      "varying vec4 v_color;",
+      "varying vec2 v_normal;",
+      "varying float v_thickness;",
+      "varying float v_feather;",
+      "varying float v_dash;",
+      "",
+      "const float dashLen = 8.0;",
+      "const float gapLen  = 6.0;",
+      "const vec4 transparent = vec4(0.0, 0.0, 0.0, 0.0);",
+      "",
+      "void main(void) {",
+      "  float pattern = mod(v_dash, dashLen + gapLen);",
+      "  if (pattern > dashLen) discard;",
+      "",
+      "  #ifdef PICKING_MODE",
+      "  gl_FragColor = v_color;",
+      "  #else",
+      "  float dist = length(v_normal) * v_thickness;",
+      "  float t = smoothstep(v_thickness - v_feather, v_thickness, dist);",
+      "  gl_FragColor = mix(v_color, transparent, t);",
+      "  #endif",
+      "}",
+    ].join("\n");
+
+    // Create subclass with dashed shaders
+    function DashedProgram() { Base.apply(this, arguments); }
+    DashedProgram.prototype = Object.create(Base.prototype);
+    DashedProgram.prototype.constructor = DashedProgram;
+
+    DashedProgram.prototype.getDefinition = function () {
+      var def = Base.prototype.getDefinition.call(this);
+      def.VERTEX_SHADER_SOURCE = DASH_VERT;
+      def.FRAGMENT_SHADER_SOURCE = DASH_FRAG;
+      return def;
+    };
+
+    return DashedProgram;
   }
 
   // ── ForceAtlas2 ────────────────────────────────────────────────────
@@ -1595,6 +1758,24 @@
     var inDeg = graph.inDegree(nodeKey);
     var outDeg = graph.outDegree(nodeKey);
     html += '<div class="info-row"><span class="attr-key">connections</span><span class="attr-val">' + neighbors + ' (in:' + inDeg + ' out:' + outDeg + ')</span></div>';
+
+    // Show redirect chain if this node is involved in one
+    var chain = getRedirectChain(nodeKey);
+    if (chain.length > 1) {
+      var chainHtml = chain.map(function (rid, i) {
+        var label = rid === nodeKey ? '<b>' + escapeHtml(rid) + '</b>' : escapeHtml(rid);
+        var status = "";
+        if (i < chain.length - 1) {
+          var edges = graph.edges(rid, chain[i + 1]);
+          if (edges.length > 0) {
+            var sc = graph.getEdgeAttribute(edges[0], "status_code");
+            if (sc) status = ' <span style="color:' + theme.accentYellow + '">[' + sc + ']</span>';
+          }
+        }
+        return label + status;
+      }).join(' → ');
+      html += '<div class="info-row" style="flex-direction:column"><span class="attr-key">redirect chain (' + chain.length + ' hops)</span><span class="attr-val" style="font-size:11px;line-height:1.6">' + chainHtml + '</span></div>';
+    }
 
     infoContent.innerHTML = html;
     infoPanel.classList.remove("hidden");
