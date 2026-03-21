@@ -272,6 +272,9 @@
   let showHidden = false;         // toggle to reveal manually hidden nodes
   let originalSizes = {};         // node key → original viz size
   let sizeMode = "default";       // "default" | "visited" | "visited-log"
+  let bundleEnabled = true;       // collapse host resources into bundle nodes
+  let bundledResources = new Set(); // resource IDs currently hidden in a bundle
+  let expandedHosts = new Set();  // hosts manually expanded by user
   let liveBuilder = null;
   let livePort = null;
   let liveRefreshTimer = null;
@@ -283,6 +286,112 @@
   let renderedTypes = new Set();
   let renderedContentGroups = new Set();
   let renderedDomains = new Set();
+
+  // ── Resource Bundling ────────────────────────────────────────────
+  // Collapse a host's resources into a single "bundle" node unless a
+  // resource has cross-host resource edges (making it "interesting").
+
+  function hostOfResource(resourceId) {
+    var idx = resourceId.indexOf("/");
+    return idx >= 0 ? resourceId.substring(0, idx) : null;
+  }
+
+  function shouldExtract(resourceId, hostId) {
+    // Extract only if connected to resources on 2+ different external hosts
+    var externalHosts = new Set();
+    graph.forEachNeighbor(resourceId, function (neighbor) {
+      var nAttrs = graph.getNodeAttributes(neighbor);
+      if (nAttrs.node_type === "resource") {
+        var nHost = hostOfResource(neighbor);
+        if (nHost && nHost !== hostId) externalHosts.add(nHost);
+      }
+    });
+    return externalHosts.size > 1;
+  }
+
+  var bundlePositions = {}; // bundleId → {x, y}
+
+  function rebuildBundles() {
+    // Save positions and remove existing bundle nodes
+    var toRemove = [];
+    graph.forEachNode(function (key, attrs) {
+      if (attrs.node_type === "bundle") {
+        bundlePositions[key] = { x: attrs.x, y: attrs.y };
+        toRemove.push(key);
+      }
+    });
+    toRemove.forEach(function (k) { graph.dropNode(k); });
+    bundledResources.clear();
+
+    if (!bundleEnabled) return;
+
+    // Group resources by host
+    var hostResources = {};
+    graph.forEachNode(function (key, attrs) {
+      if (attrs.node_type !== "resource") return;
+      var host = hostOfResource(key);
+      if (!host) return;
+      if (!hostResources[host]) hostResources[host] = [];
+      hostResources[host].push(key);
+    });
+
+    for (var host in hostResources) {
+      if (expandedHosts.has(host)) continue;
+      var resources = hostResources[host];
+      var toBundle = [];
+      for (var i = 0; i < resources.length; i++) {
+        if (!shouldExtract(resources[i], host)) toBundle.push(resources[i]);
+      }
+      if (toBundle.length <= 2) continue; // not worth collapsing
+
+      var bundleId = "bundle:" + host;
+      var hostAttrs = graph.hasNode(host) ? graph.getNodeAttributes(host) : {};
+      var hx = hostAttrs.x || 0, hy = hostAttrs.y || 0;
+      // Preserve position from previous bundle if it existed
+      var prevPos = bundlePositions[bundleId];
+      var bx = prevPos ? prevPos.x : hx + (Math.random() - 0.5) * 20;
+      var by = prevPos ? prevPos.y : hy + (Math.random() - 0.5) * 20;
+
+      graph.mergeNode(bundleId, {
+        label: host + " (" + toBundle.length + ")",
+        node_type: "bundle",
+        domain: hostAttrs.domain || parseDomain(host),
+        size: 3.0 + Math.log1p(toBundle.length),
+        color: hostAttrs.color,
+        x: bx,
+        y: by,
+        bundleHost: host,
+        bundleCount: toBundle.length,
+      });
+      originalSizes[bundleId] = 3.0 + Math.log1p(toBundle.length);
+
+      if (graph.hasNode(host) && !graph.hasEdge(host, bundleId)) {
+        graph.addEdge(host, bundleId, { weight: toBundle.length });
+      }
+
+      for (var j = 0; j < toBundle.length; j++) {
+        bundledResources.add(toBundle[j]);
+      }
+    }
+
+    // Second pass: redirect external edges to bundle nodes.
+    // For each bundled resource, find neighbors outside its host and
+    // create a single weighted edge from that neighbor to the bundle.
+    bundledResources.forEach(function (rid) {
+      var host = hostOfResource(rid);
+      var bundleId = "bundle:" + host;
+      if (!graph.hasNode(bundleId)) return;
+      graph.forEachNeighbor(rid, function (neighbor) {
+        if (neighbor === host) return;
+        if (bundledResources.has(neighbor)) return;
+        var nAttrs = graph.getNodeAttributes(neighbor);
+        if (nAttrs.node_type === "bundle") return;
+        // Create or increment weighted edge from neighbor to bundle
+        if (graph.hasEdge(neighbor, bundleId) || graph.hasEdge(bundleId, neighbor)) return;
+        graph.addEdge(neighbor, bundleId, { weight: 1 });
+      });
+    });
+  }
 
   // ── IndexedDB persistence ─────────────────────────────────────────
   var DB_NAME = "httpgraph-viewer";
@@ -368,6 +477,7 @@
   const infoContent = document.getElementById("info-content");
   const tooltip = document.getElementById("tooltip");
   const contextMenu = document.getElementById("context-menu");
+  const bundleToggle = document.getElementById("bundle-toggle");
   const showHiddenCb = document.getElementById("show-hidden");
   const showHiddenLabel = document.getElementById("show-hidden-label");
   const hiddenCountSpan = document.getElementById("hidden-count");
@@ -423,7 +533,12 @@
 
   btnExport.addEventListener("click", function () {
     if (!graph) return;
-    var gexfString = graphologyLibrary.gexf.write(graph);
+    // Export without synthetic bundle nodes
+    var exportGraph = graph.copy();
+    exportGraph.forEachNode(function (key, attrs) {
+      if (attrs.node_type === "bundle") exportGraph.dropNode(key);
+    });
+    var gexfString = graphologyLibrary.gexf.write(exportGraph);
     var blob = new Blob([gexfString], { type: "application/xml" });
     var url = URL.createObjectURL(blob);
     var a = document.createElement("a");
@@ -470,6 +585,8 @@
     renderedTypes.clear(); typeFiltersDiv.innerHTML = "";
     renderedContentGroups.clear(); contentFiltersDiv.innerHTML = "";
     renderedDomains.clear(); domainFiltersDiv.innerHTML = "";
+    expandedHosts.clear();
+    rebuildBundles();
     updateHiddenCount();
 
     requestAnimationFrame(function () {
@@ -559,6 +676,7 @@
       if (hiddenContentGroups.has(classifyContent(attrs.content_type))) return true;
     }
     if (focusSet && !focusSet.has(key)) return true;
+    if (bundledResources.has(key)) return true;
     return false;
   }
 
@@ -638,7 +756,8 @@
     var source = graph.source(edge);
     var target = graph.target(edge);
 
-    // Hide edges to manually hidden nodes
+    // Hide edges to bundled or manually hidden nodes
+    if (bundledResources.has(source) || bundledResources.has(target)) { res.hidden = true; return res; }
     if (!showHidden && (manuallyHidden.has(source) || manuallyHidden.has(target))) { res.hidden = true; return res; }
 
     // Hide edges connected to hidden nodes
@@ -933,6 +1052,7 @@
           if (renderer) renderer.refresh();
         } else if (e.data.type === "idle") {
           fa2Idle = true;
+          fa2CooldownUntil = Date.now() + 8000;
           fa2Running = false;
           killFA2Worker();
           fa2LayoutGraph = null;
@@ -971,9 +1091,11 @@
 
   // Restart FA2 with updated filter state (rebuild layout graph)
   var fa2Idle = false;
+  var fa2CooldownUntil = 0;
 
   function restartFA2IfRunning() {
     if (!fa2Running && !fa2Idle) return;
+    if (fa2Idle && Date.now() < fa2CooldownUntil) return;
     fa2Idle = false;
     stopFA2();
     killFA2Worker();
@@ -1193,7 +1315,8 @@
   // ── Type Filters ───────────────────────────────────────────────────
   var TYPE_COLORS = {
     client: theme.textPrimary, domain: theme.accentPink, host: theme.accentCyan,
-    resource: theme.accentViolet, ip: theme.accentYellow, params: theme.accentMint
+    resource: theme.accentViolet, ip: theme.accentYellow, params: theme.accentMint,
+    bundle: theme.textMuted
   };
 
   function setupTypeFilters() {
@@ -1366,8 +1489,12 @@
     hiddenDomains.clear();
     hiddenContentGroups.clear();
     manuallyHidden.clear();
+    expandedHosts.clear();
+    bundleEnabled = true;
+    bundleToggle.checked = true;
     showHidden = false;
     showHiddenCb.checked = false;
+    rebuildBundles();
     updateHiddenCount();
     selectedNode = null;
     domainFilterInput.value = "";
@@ -1482,12 +1609,20 @@
       contextTarget = payload.node;
       var attrs = graph.getNodeAttributes(payload.node);
       var isHidden = manuallyHidden.has(payload.node);
-      contextMenu.innerHTML =
+      var menuHtml =
         '<div class="menu-label">' + escapeHtml(attrs.label || payload.node) + '</div>' +
         '<div class="menu-item" data-action="' + (isHidden ? "unhide" : "hide") + '">' +
           (isHidden ? "Unhide node" : "Hide node") +
         '</div>' +
         '<div class="menu-item" data-action="hide-neighbors">Hide neighbors</div>';
+      if (attrs.node_type === "bundle" && attrs.bundleHost) {
+        menuHtml += '<div class="menu-item" data-action="expand-bundle">Expand resources</div>';
+      } else if (attrs.node_type === "host" && bundleEnabled) {
+        var isExpanded = expandedHosts.has(payload.node);
+        menuHtml += '<div class="menu-item" data-action="' + (isExpanded ? "collapse-host" : "expand-host") + '">' +
+          (isExpanded ? "Collapse resources" : "Expand resources") + '</div>';
+      }
+      contextMenu.innerHTML = menuHtml;
       contextMenu.classList.remove("hidden");
       contextMenu.style.left = payload.event.original.clientX + "px";
       contextMenu.style.top = payload.event.original.clientY + "px";
@@ -1517,11 +1652,28 @@
       graph.forEachNeighbor(contextTarget, function (neighbor) {
         manuallyHidden.add(neighbor);
       });
+    } else if (action === "expand-bundle" || action === "expand-host") {
+      var host = action === "expand-bundle"
+        ? graph.getNodeAttribute(contextTarget, "bundleHost")
+        : contextTarget;
+      if (host) { expandedHosts.add(host); rebuildBundles(); }
+    } else if (action === "collapse-host") {
+      expandedHosts.delete(contextTarget);
+      rebuildBundles();
     }
 
     updateHiddenCount();
     contextMenu.classList.add("hidden");
     contextTarget = null;
+    if (renderer) renderer.refresh();
+    restartFA2IfRunning();
+  });
+
+  // Bundle toggle
+  bundleToggle.addEventListener("change", function () {
+    bundleEnabled = bundleToggle.checked;
+    rebuildBundles();
+    updateStats();
     if (renderer) renderer.refresh();
     restartFA2IfRunning();
   });
@@ -1559,6 +1711,8 @@
   // ── Live Mode ────────────────────────────────────────────────────
   extIdInput.value = localStorage.getItem("httpgraph-ext-id") || "";
 
+  var liveReconnects = 0;
+
   function connectLive(extId) {
     if (!extId) {
       liveStatus.textContent = "Enter extension ID";
@@ -1595,6 +1749,7 @@
     }
 
     livePort.onMessage.addListener(function (msg) {
+      liveReconnects = 0; // healthy — reset retry counter
       var before = graph.order;
       liveBuilder.processRecord(msg);
       if (graph.order > before && msg.url) {
@@ -1610,14 +1765,23 @@
 
     livePort.onDisconnect.addListener(function () {
       var err = chrome.runtime && chrome.runtime.lastError;
+      livePort = null;
+      stopKeepAlive();
+      if (liveMode && liveReconnects < 5) {
+        liveReconnects++;
+        liveStatus.textContent = "Reconnecting (" + liveReconnects + "/5)...";
+        liveStatus.className = "error";
+        setTimeout(function () { if (liveMode && !livePort) connectLive(extId); }, 2000);
+        return;
+      }
       liveStatus.textContent = err ? "Disconnected: " + err.message : "Disconnected";
       liveStatus.className = "disconnected";
       btnLive.textContent = "Connect";
       btnLive.classList.remove("active");
-      livePort = null;
       liveMode = false;
     });
 
+    startKeepAlive();
     liveStatus.textContent = "Connected";
     liveStatus.className = "connected";
     btnLive.textContent = "Disconnect";
@@ -1630,12 +1794,28 @@
 
   }
 
+  // Keep the extension service worker alive by pinging every 25s
+  var keepAliveTimer = null;
+  function startKeepAlive() {
+    stopKeepAlive();
+    keepAliveTimer = setInterval(function () {
+      if (livePort) {
+        try { livePort.postMessage({ type: "ping" }); }
+        catch (e) { /* onDisconnect will handle it */ }
+      }
+    }, 25000);
+  }
+  function stopKeepAlive() {
+    if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
+  }
+
   function disconnectLive() {
+    liveMode = false; // set before disconnect to prevent auto-reconnect
+    stopKeepAlive();
     if (livePort) {
       livePort.disconnect();
       livePort = null;
     }
-    liveMode = false;
     if (liveRefreshTimer) {
       clearTimeout(liveRefreshTimer);
       liveRefreshTimer = null;
@@ -1646,6 +1826,7 @@
     if (liveRefreshTimer) return;
     liveRefreshTimer = setTimeout(function () {
       liveRefreshTimer = null;
+      if (graphGrew) rebuildBundles();
       updateStats();
       if (renderer) {
         setupSearch();
