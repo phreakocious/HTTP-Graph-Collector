@@ -859,7 +859,7 @@
       res.zIndex = 1;
     } else if (isRedirect) {
       res.color = toRGBA(theme.accentYellow, 0.7);
-      res.size = 2;
+      res.size = 1;
       res.zIndex = 2;
       if (EdgeDashedProgram) res.type = "dashed";
     } else {
@@ -876,111 +876,56 @@
   }
 
   // ── Dashed Edge Program (WebGL) ──────────────────────────────────
-  // Custom sigma edge program that renders dashed lines for redirects.
-  // Extends EdgeRectangleProgram with modified shaders that add a
-  // dash pattern based on position along the edge.
+  // Patches sigma's EdgeRectangleProgram shaders to add a dash pattern.
+  // Uses ES6 class extends (required — sigma uses ES6 classes internally).
 
   var EdgeDashedProgram = null;
 
   function initEdgeDashedProgram() {
-    var SigmaNs = typeof Sigma === "object" ? Sigma : {};
-    var Base = SigmaNs.EdgeRectangleProgram;
-    if (!Base) return null;
+    var Base = (typeof Sigma !== "undefined" && Sigma.rendering)
+      ? Sigma.rendering.EdgeRectangleProgram : null;
+    if (!Base) { console.warn("EdgeRectangleProgram not found at Sigma.rendering"); return null; }
 
-    var DASH_VERT = [
-      "attribute vec4 a_id;",
-      "attribute vec4 a_color;",
-      "attribute vec2 a_normal;",
-      "attribute float a_normalCoef;",
-      "attribute vec2 a_positionStart;",
-      "attribute vec2 a_positionEnd;",
-      "attribute float a_positionCoef;",
-      "",
-      "uniform mat3 u_matrix;",
-      "uniform float u_sizeRatio;",
-      "uniform float u_zoomRatio;",
-      "uniform float u_pixelRatio;",
-      "uniform float u_correctionRatio;",
-      "uniform float u_minEdgeThickness;",
-      "uniform float u_feather;",
-      "",
-      "varying vec4 v_color;",
-      "varying vec2 v_normal;",
-      "varying float v_thickness;",
-      "varying float v_feather;",
-      "varying float v_dash;",
-      "",
-      "const float minThickness = 1.7;",
-      "",
-      "void main(void) {",
-      "  #ifdef PICKING_MODE",
-      "  v_color = a_id;",
-      "  #else",
-      "  v_color = a_color;",
-      "  #endif",
-      "  v_color.a *= u_correctionRatio;",
-      "  v_normal = a_normal;",
-      "",
-      "  vec2 position = a_positionStart * (1.0 - a_positionCoef) + a_positionEnd * a_positionCoef;",
-      "  vec2 startScreen = (u_matrix * vec3(a_positionStart, 1.0)).xy;",
-      "  vec2 endScreen = (u_matrix * vec3(a_positionEnd, 1.0)).xy;",
-      "  float edgeLen = length(endScreen - startScreen) * 0.5 * u_pixelRatio;",
-      "  v_dash = a_positionCoef * edgeLen;",
-      "",
-      "  float normalLength = a_normal.x;",
-      "  float thickness = max(u_minEdgeThickness, u_sizeRatio * u_correctionRatio);",
-      "  v_thickness = max(thickness, minThickness);",
-      "  v_feather = u_feather * u_pixelRatio;",
-      "",
-      "  vec2 normal = vec2(-(a_positionEnd.y - a_positionStart.y), a_positionEnd.x - a_positionStart.x);",
-      "  normal = normalize(normal);",
-      "  vec2 offsetDir = normal * a_normalCoef * (v_thickness + v_feather) / 2.0 / u_sizeRatio;",
-      "",
-      "  vec3 p = u_matrix * vec3(position + offsetDir, 1.0);",
-      "  gl_Position = vec4(p.xy, 0.0, 1.0);",
-      "}",
-    ].join("\n");
+    var vertKey = "VERTEX_SHADER_SOURCE", fragKey = "FRAGMENT_SHADER_SOURCE";
 
-    var DASH_FRAG = [
-      "precision mediump float;",
-      "",
-      "varying vec4 v_color;",
-      "varying vec2 v_normal;",
-      "varying float v_thickness;",
-      "varying float v_feather;",
-      "varying float v_dash;",
-      "",
-      "const float dashLen = 8.0;",
-      "const float gapLen  = 6.0;",
-      "const vec4 transparent = vec4(0.0, 0.0, 0.0, 0.0);",
-      "",
-      "void main(void) {",
-      "  float pattern = mod(v_dash, dashLen + gapLen);",
-      "  if (pattern > dashLen) discard;",
-      "",
-      "  #ifdef PICKING_MODE",
-      "  gl_FragColor = v_color;",
-      "  #else",
-      "  float dist = length(v_normal) * v_thickness;",
-      "  float t = smoothstep(v_thickness - v_feather, v_thickness, dist);",
-      "  gl_FragColor = mix(v_color, transparent, t);",
-      "  #endif",
-      "}",
-    ].join("\n");
+    try {
 
-    // Create subclass with dashed shaders
-    function DashedProgram() { Base.apply(this, arguments); }
-    DashedProgram.prototype = Object.create(Base.prototype);
-    DashedProgram.prototype.constructor = DashedProgram;
-
-    DashedProgram.prototype.getDefinition = function () {
-      var def = Base.prototype.getDefinition.call(this);
-      def.VERTEX_SHADER_SOURCE = DASH_VERT;
-      def.FRAGMENT_SHADER_SOURCE = DASH_FRAG;
-      return def;
-    };
-
-    return DashedProgram;
+      class DashedProgram extends Base {
+        getDefinition() {
+          var def = super.getDefinition();
+          // Patch vertex shader: add v_dash varying and compute edge screen length
+          def[vertKey] = def[vertKey]
+            .replace(
+              /varying\s+float\s+v_feather;/,
+              "varying float v_feather;\nvarying float v_dash;"
+            )
+            .replace(
+              /gl_Position\s*=/,
+              "vec2 _ss = (u_matrix * vec3(a_positionStart, 1.0)).xy;\n" +
+              "vec2 _se = (u_matrix * vec3(a_positionEnd, 1.0)).xy;\n" +
+              "v_dash = a_positionCoef * length(_se - _ss) * 500.0;\n" +
+              "gl_Position ="
+            );
+          // Patch fragment shader: add v_dash varying and discard in gaps
+          def[fragKey] = def[fragKey]
+            .replace(
+              /varying\s+float\s+v_feather;/,
+              "varying float v_feather;\nvarying float v_dash;"
+            )
+            .replace(
+              /void\s+main\s*\(\s*void\s*\)\s*\{/,
+              "void main(void) {\n" +
+              "  float _dp = mod(v_dash, 14.0);\n" +
+              "  if (_dp > 8.0) discard;\n"
+            );
+          return def;
+        }
+      }
+      return DashedProgram;
+    } catch (e) {
+      console.warn("Failed to create dashed edge program:", e);
+      return null;
+    }
   }
 
   // ── ForceAtlas2 ────────────────────────────────────────────────────
@@ -1082,7 +1027,8 @@
     var lg = new Graph();
     graph.forEachNode(function (key, attrs) {
       if (!isNodeHidden(key)) {
-        lg.addNode(key, { x: attrs.x, y: attrs.y, size: getVisualSize(key, attrs) });
+        var vs = getVisualSize(key, attrs);
+        lg.addNode(key, { x: attrs.x, y: attrs.y, size: vs * 3 + 2 });
       }
     });
     graph.forEachEdge(function (edge, attrs, source, target) {
@@ -1197,6 +1143,7 @@
 
   async function startFA2() {
     if (fa2Running || !graph) return;
+    if (!fa2Settings.scalingRatio) initFA2Settings();
     fa2Running = true;
     btnFA2.textContent = "Stop ForceAtlas2";
     btnFA2.classList.add("active");
