@@ -1927,16 +1927,18 @@
 
     types.forEach(function (type) {
       if (renderedTypes.has(type)) return;
+      // ip_address / ns_provider are owned by the Investigation sidebar's
+      // infrastructure toggle. They used to get a type checkbox here as well,
+      // seeded into hiddenTypes — and isNodeHidden tests hiddenTypes before it
+      // tests showInfrastructure, so the toggle could never reveal them and
+      // read as a dead control. One owner only; isNodeHidden already defaults
+      // them hidden while the toggle is off.
+      if (type === "ip_address" || type === "ns_provider") return;
       renderedTypes.add(type);
       var label = document.createElement("label");
       var cb = document.createElement("input");
       cb.type = "checkbox";
       cb.checked = !hiddenTypes.has(type);
-      // Default IP/NS to hidden (shown via infrastructure toggle instead)
-      if (type === "ip_address" || type === "ns_provider") {
-        cb.checked = false;
-        hiddenTypes.add(type);
-      }
       cb.dataset.type = type;
       var swatch = document.createElement("span");
       swatch.className = "swatch";
@@ -2108,9 +2110,13 @@
     // data — a plain HTTP-graph GEXF has none of these edge types and would
     // otherwise get an empty panel. Evaluated on every load rather than only
     // when it changes, so going back to a plain graph hides the panel again.
+    var hasInfrastructure = graph.someNode(function (key, attrs) {
+      return attrs.node_type === "ip_address" || attrs.node_type === "ns_provider";
+    });
     var hasISAP = Object.keys(operatorMap).length > 0 ||
                   Object.keys(clusterMap).length > 0 ||
-                  Object.keys(roleSet).length > 0;
+                  Object.keys(roleSet).length > 0 ||
+                  hasInfrastructure;
     investigationSection.classList.toggle("hidden", !hasISAP);
     if (!hasISAP) return;
 
