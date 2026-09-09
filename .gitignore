@@ -6,3 +6,4 @@
 *.json
 node_modules/
 .venv/
+gephi-plugins
