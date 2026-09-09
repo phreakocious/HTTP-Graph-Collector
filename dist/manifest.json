@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "HTTP Graph Collector",
-    "version": "0.6",
+    "version": "0.7",
     "description": "Builds a graph from your HTTP traffic. View live at nullphase.net/hg or POST to a localhost REST API. All data stays local.",
     "background":
     {
