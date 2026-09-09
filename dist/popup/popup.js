@@ -65,6 +65,7 @@ function saveOptions() {
 document.addEventListener('DOMContentLoaded', function() {
   restoreOptions();
   const extIdEl = document.getElementById('ext-id');
+  document.getElementById('version').textContent = 'v' + chrome.runtime.getManifest().version;
   extIdEl.textContent = chrome.runtime.id;
   extIdEl.addEventListener('click', function() {
     navigator.clipboard.writeText(chrome.runtime.id).then(function() {

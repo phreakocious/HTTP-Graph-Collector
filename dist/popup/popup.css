@@ -288,6 +288,12 @@ textarea::placeholder {
   color: var(--text-muted);
   font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
   cursor: pointer;
+  /* Truncate so the footer's three items fit one line; the click handler
+     copies chrome.runtime.id, not this text, so the full ID still copies. */
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   transition: color 0.15s;
 }
 
@@ -299,6 +305,7 @@ textarea::placeholder {
   font-size: 11px;
   color: var(--text-muted);
   text-decoration: none;
+  white-space: nowrap;
   transition: color 0.15s;
 }
 
