@@ -283,6 +283,232 @@
   let redirectNext = {};          // resourceId → next resourceId in redirect chain
   let redirectPrev = {};          // resourceId → prev resourceId in redirect chain
 
+  // ── ISAP Investigation State ────────────────────────────────────
+  let operatorMap = {};       // operator_name → Set<domain_node_key>
+  let clusterMap = {};        // cluster_name → Set<domain_node_key>
+  let parentCluster = {};     // cluster_name → parent_cluster_name
+  let roleSet = {};           // node_role → Set<resource_node_key>
+  let sharedIPMap = {};       // ip_node_key → Set<domain_node_key>
+  let sharedNSMap = {};       // ns_node_key → Set<domain_node_key>
+  let sharesHostPairs = new Set(); // edge keys for shares_host edges
+
+  let activeOperator = null;    // selected operator name or null
+  let activeCluster = null;     // selected cluster name or null
+  let activeColorMode = "domain"; // "domain"|"operator"|"cluster"|"role"|"infrastructure"
+  let hiddenRoles = new Set();  // node_role values hidden via checkboxes
+  let showInfrastructure = false; // toggle for IP/NS node visibility
+  let investigationFocusSet = null; // Set<node_key> for operator/cluster subgraph
+  let nodeToDomain = {};            // node_key → domain_node_key (for hosts/resources)
+
+  // ── Highlight Map (hop-distance BFS from active node) ──────────
+  // Maps node_key → hop distance (0 = the active node itself).
+  // Rebuilt when hoveredNode, selectedNode, or hop slider changes.
+  let highlightMap = null;          // Map<node_key, number> or null
+  let highlightHops = 2;           // current hop slider value
+
+  function rebuildHighlightMap() {
+    var anchor = hoveredNode || selectedNode;
+    if (!anchor || !graph || !graph.hasNode(anchor)) { highlightMap = null; return; }
+    var maxHops = highlightHops;
+    var map = new Map();
+    map.set(anchor, 0);
+    var queue = [{ node: anchor, depth: 0 }];
+    while (queue.length > 0) {
+      var cur = queue.shift();
+      if (cur.depth >= maxHops) continue;
+      graph.forEachNeighbor(cur.node, function (neighbor) {
+        if (map.has(neighbor)) return;
+        var nAttrs = graph.getNodeAttributes(neighbor);
+        // Don't traverse through client nodes — they connect to everything
+        if (nAttrs.node_type === "client") return;
+        map.set(neighbor, cur.depth + 1);
+        queue.push({ node: neighbor, depth: cur.depth + 1 });
+      });
+    }
+    highlightMap = map;
+  }
+
+  function buildISAPIndexes() {
+    nodeToDomain = {};
+    operatorMap = {};
+    clusterMap = {};
+    parentCluster = {};
+    roleSet = {};
+    sharedIPMap = {};
+    sharedNSMap = {};
+    sharesHostPairs = new Set();
+
+    graph.forEachNode(function (key, attrs) {
+      if (attrs.node_role && attrs.node_role !== "") {
+        if (!roleSet[attrs.node_role]) roleSet[attrs.node_role] = new Set();
+        roleSet[attrs.node_role].add(key);
+      }
+    });
+
+    graph.forEachEdge(function (edge, attrs, source, target) {
+      var et = attrs.edge_type;
+      if (et === "attribution") {
+        var opAttrs = graph.getNodeAttributes(source);
+        var opName = opAttrs.label || source;
+        if (!operatorMap[opName]) operatorMap[opName] = new Set();
+        operatorMap[opName].add(target);
+      } else if (et === "membership") {
+        var clAttrs = graph.getNodeAttributes(source);
+        var clName = clAttrs.label || source;
+        if (!clusterMap[clName]) clusterMap[clName] = new Set();
+        clusterMap[clName].add(target);
+      } else if (et === "parent_cluster") {
+        var childAttrs = graph.getNodeAttributes(source);
+        var parentAttrs = graph.getNodeAttributes(target);
+        parentCluster[childAttrs.label || source] = parentAttrs.label || target;
+      } else if (et === "hosted_on") {
+        if (!sharedIPMap[target]) sharedIPMap[target] = new Set();
+        sharedIPMap[target].add(source);
+      } else if (et === "uses_ns") {
+        if (!sharedNSMap[target]) sharedNSMap[target] = new Set();
+        sharedNSMap[target].add(source);
+      } else if (et === "shares_host") {
+        sharesHostPairs.add(edge);
+      }
+    });
+
+    // Prune non-shared IPs/NS (only keep those with 2+ domains)
+    Object.keys(sharedIPMap).forEach(function (ip) {
+      if (sharedIPMap[ip].size < 2) delete sharedIPMap[ip];
+    });
+    Object.keys(sharedNSMap).forEach(function (ns) {
+      if (sharedNSMap[ns].size < 2) delete sharedNSMap[ns];
+    });
+
+    // Build node → domain mapping via hierarchy edges (domain→host→resource)
+    graph.forEachNode(function (key, attrs) {
+      if (attrs.node_type === "domain") {
+        nodeToDomain[key] = key; // domain maps to itself
+        graph.forEachOutNeighbor(key, function (hostKey) {
+          var hAttrs = graph.getNodeAttributes(hostKey);
+          if (hAttrs.node_type === "host") {
+            nodeToDomain[hostKey] = key;
+            graph.forEachOutNeighbor(hostKey, function (resKey) {
+              var rAttrs = graph.getNodeAttributes(resKey);
+              if (rAttrs.node_type === "resource") {
+                nodeToDomain[resKey] = key;
+              }
+            });
+          }
+        });
+      }
+    });
+
+    window._isap = { operatorMap: operatorMap, clusterMap: clusterMap, parentCluster: parentCluster, roleSet: roleSet, sharedIPMap: sharedIPMap, sharedNSMap: sharedNSMap, nodeToDomain: nodeToDomain, graph: graph }; // debug exposure — remove when stable
+  }
+
+  function buildInvestigationFocusSet() {
+    if (!activeOperator && !activeCluster) {
+      investigationFocusSet = null;
+      return;
+    }
+
+    var focus = new Set();
+    var domains = new Set();
+
+    if (activeOperator) {
+      // Add the operator node itself
+      graph.forEachNode(function (key, attrs) {
+        if (attrs.node_type === "operator" && (attrs.label === activeOperator || key === activeOperator)) {
+          focus.add(key);
+          // Also add technique and token nodes connected to this operator
+          graph.forEachOutNeighbor(key, function (neighbor) {
+            var nAttrs = graph.getNodeAttributes(neighbor);
+            if (nAttrs.node_type === "technique" || nAttrs.node_type === "token") {
+              focus.add(neighbor);
+            }
+          });
+        }
+      });
+      // Add attributed domains
+      var opDomains = operatorMap[activeOperator];
+      if (opDomains) opDomains.forEach(function (d) { domains.add(d); });
+    }
+
+    if (activeCluster) {
+      // Add the cluster node itself
+      graph.forEachNode(function (key, attrs) {
+        if (attrs.node_type === "cluster" && (attrs.label === activeCluster || key === activeCluster)) {
+          focus.add(key);
+        }
+      });
+      // Add member domains
+      var clDomains = clusterMap[activeCluster];
+      if (clDomains) clDomains.forEach(function (d) { domains.add(d); });
+
+      // If meta-campaign, include child clusters and their domains
+      var clusterAttrs = null;
+      graph.forEachNode(function (key, attrs) {
+        if (attrs.node_type === "cluster" && (attrs.label === activeCluster || key === activeCluster)) {
+          clusterAttrs = attrs;
+        }
+      });
+      if (clusterAttrs && clusterAttrs.is_meta === "true") {
+        Object.keys(parentCluster).forEach(function (child) {
+          if (parentCluster[child] === activeCluster) {
+            // Add child cluster node
+            graph.forEachNode(function (key, attrs) {
+              if (attrs.node_type === "cluster" && (attrs.label === child || key === child)) {
+                focus.add(key);
+              }
+            });
+            // Add child cluster's domains
+            var childDomains = clusterMap[child];
+            if (childDomains) childDomains.forEach(function (d) { domains.add(d); });
+          }
+        });
+      }
+    }
+
+    // Expand domains → hosts → resources via hierarchy edges
+    domains.forEach(function (domainKey) {
+      focus.add(domainKey);
+      graph.forEachOutNeighbor(domainKey, function (hostKey) {
+        var hAttrs = graph.getNodeAttributes(hostKey);
+        if (hAttrs.node_type === "host") {
+          focus.add(hostKey);
+          graph.forEachOutNeighbor(hostKey, function (resKey) {
+            var rAttrs = graph.getNodeAttributes(resKey);
+            if (rAttrs.node_type === "resource") {
+              focus.add(resKey);
+              // Follow redirect chains from these resources
+              var next = redirectNext[resKey];
+              var seen = new Set();
+              while (next && !seen.has(next)) {
+                seen.add(next);
+                focus.add(next);
+                next = redirectNext[next];
+              }
+            }
+          });
+        }
+      });
+    });
+
+    // Add clusters containing these domains (reverse lookup)
+    if (activeOperator) {
+      Object.keys(clusterMap).forEach(function (clName) {
+        var members = clusterMap[clName];
+        members.forEach(function (d) {
+          if (domains.has(d)) {
+            graph.forEachNode(function (key, attrs) {
+              if (attrs.node_type === "cluster" && (attrs.label === clName || key === clName)) {
+                focus.add(key);
+              }
+            });
+          }
+        });
+      });
+    }
+
+    investigationFocusSet = focus;
+  }
+
   function getRedirectChain(nodeKey) {
     if (!redirectNext[nodeKey] && !redirectPrev[nodeKey]) return [];
     // Walk back to chain start
@@ -520,6 +746,7 @@
   const container = document.getElementById("graph-container");
   const extIdInput = document.getElementById("ext-id");
   const btnLive = document.getElementById("btn-live");
+  const autoConnectCb = document.getElementById("auto-connect");
   const liveStatus = document.getElementById("live-status");
   liveStatus.textContent = "Disconnected";
   liveStatus.className = "disconnected";
@@ -545,6 +772,7 @@
     infoClose.addEventListener("click", function () {
       infoPanel.classList.add("hidden");
       selectedNode = null;
+      rebuildHighlightMap();
       if (renderer) renderer.refresh();
     });
   })();
@@ -633,6 +861,7 @@
 
     hoveredNode = null;
     selectedNode = null;
+    highlightMap = null;
     focusSet = null;
     hiddenTypes.clear();
     hiddenDomains.clear();
@@ -649,6 +878,12 @@
     expandedHosts.clear();
     redirectNext = {};
     redirectPrev = {};
+    activeOperator = null;
+    activeCluster = null;
+    activeColorMode = "domain";
+    hiddenRoles = new Set();
+    showInfrastructure = false;
+    investigationFocusSet = null;
     rebuildBundles();
     updateHiddenCount();
 
@@ -668,6 +903,7 @@
         defaultEdgeColor: theme.border,
         defaultEdgeType: "arrow",
         defaultDrawNodeHover: drawNodeHover,
+        enableEdgeEvents: true,
       });
 
       btnExport.classList.remove("hidden");
@@ -684,6 +920,7 @@
       setupTypeFilters();
       setupContentFilters();
       setupDomainFilters();
+      setupInvestigation();
       setupHover();
       setupInfoPanel();
       setupContextMenu();
@@ -737,6 +974,8 @@
       }
     });
 
+    buildISAPIndexes();
+
     liveMode = false;
     initRenderer();
     saveGraph();
@@ -751,6 +990,16 @@
     if (hiddenContentGroups.size > 0 && attrs.node_type === "resource" && attrs.content_type) {
       if (hiddenContentGroups.has(classifyContent(attrs.content_type))) return true;
     }
+    // ISAP: hide IP/NS nodes unless infrastructure overlay is on; always hide orphans
+    if (attrs.node_type === "ip_address" || attrs.node_type === "ns_provider") {
+      if (!showInfrastructure || graph.degree(key) === 0) return true;
+    }
+    // ISAP: role filter (only affects resources)
+    if (hiddenRoles.size > 0 && attrs.node_type === "resource" && attrs.node_role) {
+      if (hiddenRoles.has(attrs.node_role)) return true;
+    }
+    // ISAP: operator/cluster subgraph filter
+    if (investigationFocusSet && !investigationFocusSet.has(key)) return true;
     if (focusSet && !focusSet.has(key)) return true;
     if (bundledResources.has(key)) return true;
     return false;
@@ -773,29 +1022,147 @@
     }
   }
 
+  // ── ISAP Contextual Coloring ──────────────────────────────────────
+  var ROLE_COLORS = {
+    entry_point: "#05ffa1",       // mint/green
+    redirect_hop: "#fffb96",      // yellow
+    landing: "#ff9f43",           // orange
+    monetization: "#ef4444",      // red
+    commercial_relay: "#01cdfe",  // cyan/blue
+  };
+
+  var OPERATOR_PALETTE = [
+    "#ff71ce", "#01cdfe", "#05ffa1", "#fffb96", "#b967ff",
+    "#ff9f43", "#ef4444", "#7afcff", "#ffd700", "#ff6b6b",
+  ];
+
+  // Returns { color: <raw hex/named>, alpha: <0-1> } — never pre-blended.
+  // Callers that need a final display color should pass through toRGBA themselves.
+  function getNodeColorRaw(key, attrs) {
+    if (activeColorMode === "domain" || !activeColorMode) {
+      return { color: attrs.color || theme.accentViolet, alpha: 1 };
+    }
+
+    var myDomain = nodeToDomain[key];
+
+    if (activeColorMode === "role") {
+      if (attrs.node_type === "resource" && attrs.node_role) {
+        return { color: ROLE_COLORS[attrs.node_role] || theme.textMuted, alpha: 1 };
+      }
+      return { color: theme.textMuted, alpha: 0.3 };
+    }
+
+    if (activeColorMode === "operator") {
+      if (activeOperator) {
+        var opDomains = operatorMap[activeOperator];
+        if (attrs.node_type === "operator" && (attrs.label === activeOperator || key === activeOperator)) {
+          return { color: theme.accentPink, alpha: 1 };
+        }
+        if (attrs.node_type === "technique" || attrs.node_type === "token") {
+          return { color: theme.accentPink, alpha: 1 };
+        }
+        if (myDomain && opDomains && opDomains.has(myDomain)) {
+          return { color: attrs.color || theme.accentViolet, alpha: 1 };
+        }
+        return { color: theme.textMuted, alpha: 0.25 };
+      }
+      var opNames = Object.keys(operatorMap);
+      for (var i = 0; i < opNames.length; i++) {
+        if (myDomain && operatorMap[opNames[i]].has(myDomain)) {
+          return { color: OPERATOR_PALETTE[i % OPERATOR_PALETTE.length], alpha: 1 };
+        }
+      }
+      return { color: theme.textMuted, alpha: 0.25 };
+    }
+
+    if (activeColorMode === "cluster") {
+      if (activeCluster) {
+        var clDomains = clusterMap[activeCluster];
+        if (attrs.node_type === "cluster" && (attrs.label === activeCluster || key === activeCluster)) {
+          return { color: theme.accentCyan, alpha: 1 };
+        }
+        if (myDomain && clDomains && clDomains.has(myDomain)) {
+          return { color: attrs.color || theme.accentViolet, alpha: 1 };
+        }
+        return { color: theme.textMuted, alpha: 0.25 };
+      }
+      var clNames = Object.keys(clusterMap);
+      for (var j = 0; j < clNames.length; j++) {
+        if (myDomain && clusterMap[clNames[j]].has(myDomain)) {
+          return { color: OPERATOR_PALETTE[j % OPERATOR_PALETTE.length], alpha: 1 };
+        }
+      }
+      return { color: theme.textMuted, alpha: 0.25 };
+    }
+
+    if (activeColorMode === "infrastructure") {
+      if (attrs.node_type === "ip_address") return { color: theme.accentYellow, alpha: 1 };
+      if (attrs.node_type === "ns_provider") return { color: theme.accentCyan, alpha: 1 };
+      var domKey = myDomain || key;
+      var ipKeys = Object.keys(sharedIPMap);
+      for (var k = 0; k < ipKeys.length; k++) {
+        if (sharedIPMap[ipKeys[k]].has(domKey)) {
+          return { color: OPERATOR_PALETTE[k % OPERATOR_PALETTE.length], alpha: 1 };
+        }
+      }
+      return { color: theme.textMuted, alpha: 0.25 };
+    }
+
+    return { color: attrs.color || theme.accentViolet, alpha: 1 };
+  }
+
+  function getNodeColor(key, attrs) {
+    var raw = getNodeColorRaw(key, attrs);
+    if (raw.alpha >= 1) return raw.color;
+    return toRGBA(raw.color, raw.alpha);
+  }
+
   function nodeReducer(key, attrs) {
     var res = Object.assign({}, attrs);
 
     if (isNodeHidden(key, attrs)) { res.hidden = true; return res; }
-    if (manuallyHidden.has(key) && showHidden) { res.color = theme.textMuted; }
+    if (manuallyHidden.has(key) && showHidden) {
+      res.color = theme.textMuted;
+    } else {
+      res.color = getNodeColor(key, attrs);
+    }
 
     // Dynamic Size Scaling
     res.size = getVisualSize(key, attrs);
 
-    // Hover dimming
-    if (hoveredNode && hoveredNode !== key && !graph.areNeighbors(hoveredNode, key)) {
-      res.color = theme.bgCard;
-      res.label = "";
-      res.zIndex = 0;
-    } else if (hoveredNode && (hoveredNode === key || graph.areNeighbors(hoveredNode, key))) {
-      res.highlighted = true;
-      res.zIndex = 1;
+    // Hover/selection highlighting with hop-distance decay
+    var anchor = hoveredNode || selectedNode;
+    if (anchor && highlightMap) {
+      var hopDist = highlightMap.get(key);
+      if (hopDist !== undefined) {
+        // Within highlight radius — decay intensity by hop
+        if (hopDist === 0) {
+          res.highlighted = true;
+          res.zIndex = 2;
+        } else {
+          // Decay: hop 1 = 0.85, hop 2 = 0.65, hop 3 = 0.45, etc.
+          var decay = Math.max(0.25, 1.0 - hopDist * 0.2);
+          if (hoveredNode) {
+            res.highlighted = true;
+          }
+          res.zIndex = 1;
+          // Use raw color to avoid double-compositing
+          var raw = getNodeColorRaw(key, attrs);
+          res.color = toRGBA(raw.color, raw.alpha * (0.4 + 0.6 * decay));
+        }
+      } else if (hoveredNode) {
+        // Outside highlight radius during hover → full dim
+        res.color = theme.bgCard;
+        res.label = "";
+        res.zIndex = 0;
+      }
+      // Outside highlight radius during selection (no hover) → no change (subtle)
     }
 
-    // Selected highlight
+    // Always highlight the selected node itself
     if (selectedNode === key) {
       res.highlighted = true;
-      res.zIndex = 1;
+      res.zIndex = 2;
     }
 
     return res;
@@ -844,30 +1211,65 @@
 
     // Focus mode
     if (focusSet && (!focusSet.has(source) || !focusSet.has(target))) { res.hidden = true; return res; }
+    // ISAP: investigation focus — hide edges outside subgraph
+    if (investigationFocusSet && (!investigationFocusSet.has(source) || !investigationFocusSet.has(target))) {
+      res.hidden = true; return res;
+    }
 
     var isCrossDomain = (sAttrs.domain && tAttrs.domain && sAttrs.domain !== tAttrs.domain && sAttrs.node_type !== 'client' && tAttrs.node_type !== 'client');
     var isRedirect = attrs.edge_type === "redirect";
     var sColor = sAttrs.color || theme.border;
 
-    // Hover dimming
-    if (hoveredNode && source !== hoveredNode && target !== hoveredNode) {
-      res.color = theme.bgPage;
-      res.zIndex = 0;
-    } else if (hoveredNode) {
-      res.color = isRedirect ? theme.accentYellow : toRGBA(sColor, 0.6);
-      res.size = res.size ? res.size * 1.2 : 1.5;
-      res.zIndex = 1;
+    // Hover/selection edge highlighting with hop-distance decay
+    var anchor = hoveredNode || selectedNode;
+    if (anchor && highlightMap) {
+      var sDist = highlightMap.get(source);
+      var tDist = highlightMap.get(target);
+      // An edge is "in range" if both endpoints are in the highlight map
+      // Its hop level = the max of the two endpoint distances
+      if (sDist !== undefined && tDist !== undefined) {
+        var edgeHop = Math.max(sDist, tDist);
+        // Decay: hop 0-edge = full, then fading out
+        // Hover mode: brighter (0.6 base), Selection mode: moderate (0.45 base)
+        var baseAlpha = hoveredNode ? 0.6 : 0.45;
+        var decay = Math.max(0.2, 1.0 - edgeHop * 0.25);
+        var alpha = baseAlpha * decay;
+        var sizeMult = hoveredNode ? 1.2 : 1.1;
+        var sizeDecay = Math.max(0.5, 1.0 - edgeHop * 0.15);
+        res.color = isRedirect ? theme.accentYellow : toRGBA(sColor, alpha);
+        res.size = (res.size ? res.size * sizeMult : 1.5) * sizeDecay;
+        res.zIndex = 2 - edgeHop;
+      } else if (hoveredNode) {
+        // Outside highlight radius during hover → dim
+        res.color = theme.bgPage;
+        res.zIndex = 0;
+      }
+      // Outside radius during selection (no hover) → fall through to normal styling
+      if (sDist !== undefined || tDist !== undefined || hoveredNode) return res;
+    }
+
+    if (showInfrastructure && sharesHostPairs.has(edge)) {
+      res.color = theme.accentMint;
+      res.size = 2;
+      res.zIndex = 3;
     } else if (isRedirect) {
       res.color = toRGBA(theme.accentYellow, 0.7);
       res.size = 1;
       res.zIndex = 2;
       if (EdgeDashedProgram) res.type = "dashed";
     } else {
-      if (isCrossDomain) {
+      if (activeColorMode !== "domain") {
+        // In investigation modes, use source node's raw contextual color
+        var srcRaw = getNodeColorRaw(source, sAttrs);
+        var tgtRaw = getNodeColorRaw(target, tAttrs);
+        var bothHighlighted = srcRaw.alpha > 0.5 && tgtRaw.alpha > 0.5;
+        res.color = bothHighlighted ? toRGBA(srcRaw.color, srcRaw.alpha * 0.4) : toRGBA(theme.textMuted, 0.05);
+        res.zIndex = bothHighlighted ? 1 : 0;
+      } else if (isCrossDomain) {
         res.color = toRGBA(sColor, 0.25);
         res.zIndex = 1;
       } else {
-        res.color = toRGBA(sColor, 0.08);
+        res.color = toRGBA(sColor, 0.15);
         res.zIndex = 0;
       }
     }
@@ -1197,6 +1599,7 @@
           btnFA2.classList.remove("active");
           fa2ModeLabel.textContent = "idle — settled";
           fa2SettingsDiv.classList.remove("hidden");
+          saveGraph();
         }
       };
     } else {
@@ -1208,6 +1611,7 @@
   }
 
   function stopFA2() {
+    var wasRunning = fa2Running;
     fa2Running = false;
     fa2Idle = false;
     if (fa2Worker && fa2UseWorker) {
@@ -1218,6 +1622,7 @@
     btnFA2.textContent = "Start ForceAtlas2";
     btnFA2.classList.remove("active");
     fa2SettingsDiv.classList.add("hidden");
+    if (wasRunning) saveGraph();
   }
 
   function killFA2Worker() {
@@ -1405,6 +1810,7 @@
     }
     if (nodeKey) {
       selectedNode = nodeKey;
+      rebuildHighlightMap();
       var pos = renderer.getNodeDisplayData(nodeKey);
       if (pos) {
         renderer.getCamera().animate(
@@ -1420,6 +1826,9 @@
   // ── Focus ──────────────────────────────────────────────────────────
   hopSlider.addEventListener("input", function () {
     hopValue.textContent = hopSlider.value;
+    highlightHops = parseInt(hopSlider.value, 10);
+    rebuildHighlightMap();
+    if (renderer) renderer.refresh();
   });
 
   btnFocus.addEventListener("click", function () {
@@ -1469,6 +1878,11 @@
       var cb = document.createElement("input");
       cb.type = "checkbox";
       cb.checked = !hiddenTypes.has(type);
+      // Default IP/NS to hidden (shown via infrastructure toggle instead)
+      if (type === "ip_address" || type === "ns_provider") {
+        cb.checked = false;
+        hiddenTypes.add(type);
+      }
       cb.dataset.type = type;
       var swatch = document.createElement("span");
       swatch.className = "swatch";
@@ -1553,11 +1967,15 @@
         restartFA2IfRunning();
       });
     });
+    var contentSection = document.getElementById("content-section");
     if (added) {
       contentFiltersDiv.appendChild(fragment);
       var labels = Array.from(contentFiltersDiv.querySelectorAll("label"));
       labels.sort((a, b) => a.textContent.localeCompare(b.textContent));
       labels.forEach(lbl => contentFiltersDiv.appendChild(lbl));
+      if (contentSection) contentSection.style.display = "";
+    } else if (contentSection) {
+      contentSection.style.display = "none";
     }
   }
 
@@ -1619,6 +2037,166 @@
     });
   });
 
+  // ── Investigation Filters ──────────────────────────────────────────
+  var ROLE_DISPLAY = ["entry_point", "redirect_hop", "landing", "monetization", "commercial_relay"];
+
+  function setupInvestigation() {
+    var opSelect = document.getElementById("operator-select");
+    var clSelect = document.getElementById("cluster-select");
+    var colorSelect = document.getElementById("color-select");
+    var infraToggle = document.getElementById("infra-toggle");
+    var roleFiltersDiv = document.getElementById("role-filters");
+    var investigationSection = document.getElementById("investigation-section");
+
+    if (!opSelect || !clSelect) return;
+
+    // Surface the Investigation UI only when the graph actually carries ISAP
+    // data — a plain HTTP-graph GEXF has none of these edge types and would
+    // otherwise get an empty panel. Evaluated on every load rather than only
+    // when it changes, so going back to a plain graph hides the panel again.
+    var hasISAP = Object.keys(operatorMap).length > 0 ||
+                  Object.keys(clusterMap).length > 0 ||
+                  Object.keys(roleSet).length > 0;
+    investigationSection.classList.toggle("hidden", !hasISAP);
+    if (!hasISAP) return;
+
+    // Populate operator dropdown
+    opSelect.innerHTML = '<option value="">All</option>';
+    Object.keys(operatorMap).sort().forEach(function (op) {
+      var opt = document.createElement("option");
+      opt.value = op;
+      opt.textContent = op.replace(/^Operator-/, "");
+      opSelect.appendChild(opt);
+    });
+
+    // Populate cluster dropdown (meta-campaigns first, then children indented)
+    clSelect.innerHTML = '<option value="">All</option>';
+    var metaClusters = [];
+    var childClusters = {};
+    var standaloneClusters = [];
+
+    Object.keys(clusterMap).sort().forEach(function (cl) {
+      if (parentCluster[cl]) {
+        var parent = parentCluster[cl];
+        if (!childClusters[parent]) childClusters[parent] = [];
+        childClusters[parent].push(cl);
+      } else {
+        // Check if this is a meta-campaign
+        var isMeta = false;
+        graph.forEachNode(function (key, attrs) {
+          if (attrs.node_type === "cluster" && (attrs.label === cl || key === cl) && attrs.is_meta === "true") {
+            isMeta = true;
+          }
+        });
+        if (isMeta) metaClusters.push(cl);
+        else standaloneClusters.push(cl);
+      }
+    });
+
+    metaClusters.forEach(function (meta) {
+      var opt = document.createElement("option");
+      opt.value = meta;
+      opt.textContent = meta;
+      opt.style.fontWeight = "bold";
+      clSelect.appendChild(opt);
+      if (childClusters[meta]) {
+        childClusters[meta].sort().forEach(function (child) {
+          var cOpt = document.createElement("option");
+          cOpt.value = child;
+          cOpt.textContent = "\u00A0\u00A0\u00A0" + child;
+          clSelect.appendChild(cOpt);
+        });
+      }
+    });
+    standaloneClusters.forEach(function (cl) {
+      var opt = document.createElement("option");
+      opt.value = cl;
+      opt.textContent = cl;
+      clSelect.appendChild(opt);
+    });
+
+    // Populate role checkboxes
+    roleFiltersDiv.innerHTML = "";
+    ROLE_DISPLAY.forEach(function (role) {
+      if (!roleSet[role]) return;
+      var label = document.createElement("label");
+      var cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = true;
+      cb.dataset.role = role;
+      var swatch = document.createElement("span");
+      swatch.className = "role-swatch";
+      swatch.style.background = ROLE_COLORS[role] || "#888";
+      label.appendChild(cb);
+      label.appendChild(swatch);
+      label.appendChild(document.createTextNode(" " + role.replace(/_/g, " ")));
+      roleFiltersDiv.appendChild(label);
+
+      cb.addEventListener("change", function () {
+        if (cb.checked) {
+          hiddenRoles.delete(role);
+        } else {
+          hiddenRoles.add(role);
+        }
+        if (renderer) renderer.refresh();
+      });
+    });
+
+    // Operator select
+    opSelect.addEventListener("change", function () {
+      activeOperator = opSelect.value || null;
+      activeCluster = null;
+      clSelect.value = "";
+      if (activeOperator) {
+        activeColorMode = "operator";
+        colorSelect.value = "operator";
+      } else if (!activeCluster) {
+        activeColorMode = "domain";
+        colorSelect.value = "domain";
+      }
+      buildInvestigationFocusSet();
+      if (renderer) renderer.refresh();
+      restartFA2IfRunning();
+    });
+
+    // Cluster select
+    clSelect.addEventListener("change", function () {
+      activeCluster = clSelect.value || null;
+      activeOperator = null;
+      opSelect.value = "";
+      if (activeCluster) {
+        activeColorMode = "cluster";
+        colorSelect.value = "cluster";
+      } else if (!activeOperator) {
+        activeColorMode = "domain";
+        colorSelect.value = "domain";
+      }
+      buildInvestigationFocusSet();
+      if (renderer) renderer.refresh();
+      restartFA2IfRunning();
+    });
+
+    // Color-by select
+    colorSelect.addEventListener("change", function () {
+      activeColorMode = colorSelect.value || "domain";
+      if (renderer) renderer.refresh();
+    });
+
+    // Infrastructure toggle
+    infraToggle.addEventListener("change", function () {
+      showInfrastructure = infraToggle.checked;
+      if (showInfrastructure && activeColorMode === "domain") {
+        activeColorMode = "infrastructure";
+        colorSelect.value = "infrastructure";
+      } else if (!showInfrastructure && activeColorMode === "infrastructure") {
+        activeColorMode = "domain";
+        colorSelect.value = "domain";
+      }
+      if (renderer) renderer.refresh();
+      restartFA2IfRunning();
+    });
+  }
+
   // ── Reset ──────────────────────────────────────────────────────────
   btnReset.addEventListener("click", function () {
     focusSet = null;
@@ -1631,9 +2209,16 @@
     bundleToggle.checked = true;
     showHidden = false;
     showHiddenCb.checked = false;
+    activeOperator = null;
+    activeCluster = null;
+    activeColorMode = "domain";
+    hiddenRoles.clear();
+    showInfrastructure = false;
+    investigationFocusSet = null;
     rebuildBundles();
     updateHiddenCount();
     selectedNode = null;
+    highlightMap = null;
     domainFilterInput.value = "";
     domainFilterText = "";
     searchInput.value = "";
@@ -1643,6 +2228,18 @@
     contentFiltersDiv.querySelectorAll("input").forEach(function (cb) { cb.checked = true; });
     domainFiltersDiv.querySelectorAll("input").forEach(function (cb) { cb.checked = true; });
     domainFiltersDiv.querySelectorAll("label").forEach(function (lbl) { lbl.style.display = ""; });
+
+    // Reset investigation controls
+    var opSelect = document.getElementById("operator-select");
+    var clSelect = document.getElementById("cluster-select");
+    var colorSelect = document.getElementById("color-select");
+    var infraToggle = document.getElementById("infra-toggle");
+    if (opSelect) opSelect.value = "";
+    if (clSelect) clSelect.value = "";
+    if (colorSelect) colorSelect.value = "domain";
+    if (infraToggle) infraToggle.checked = false;
+    var roleChecks = document.querySelectorAll("#role-filters input");
+    roleChecks.forEach(function (cb) { cb.checked = true; });
 
     infoPanel.classList.add("hidden");
     updateStats();
@@ -1665,6 +2262,7 @@
   function setupHover() {
     renderer.on("enterNode", function (payload) {
       hoveredNode = payload.node;
+      rebuildHighlightMap();
       container.style.cursor = "pointer";
       showTooltip(payload.node, payload.event);
       renderer.refresh();
@@ -1672,6 +2270,7 @@
 
     renderer.on("leaveNode", function () {
       hoveredNode = null;
+      rebuildHighlightMap();
       container.style.cursor = "default";
       tooltip.classList.add("hidden");
       renderer.refresh();
@@ -1682,7 +2281,7 @@
     var attrs = graph.getNodeAttributes(nodeKey);
     var html = '<div class="tt-label">' + escapeHtml(attrs.label || nodeKey) + '</div>';
 
-    var fields = ["node_type", "domain", "method", "protocol", "status_code", "content_type", "request_type", "bytes", "duration_ms"];
+    var fields = ["node_type", "node_role", "domain", "operator", "cluster", "status_code", "content_type", "asn_org"];
     fields.forEach(function (f) {
       if (attrs[f] != null && attrs[f] !== "") {
         html += '<div class="tt-row"><span class="tt-key">' + f + ':</span> ' + escapeHtml(String(attrs[f])) + '</div>';
@@ -1704,49 +2303,364 @@
   function setupInfoPanel() {
     renderer.on("clickNode", function (event) {
       selectedNode = event.node;
+      rebuildHighlightMap();
       showNodeInfo(event.node);
       renderer.refresh();
     });
+    renderer.on("clickEdge", function (event) {
+      showEdgeInfo(event.edge);
+    });
+  }
+
+  function showEdgeInfo(edgeKey) {
+    var infoTitle = document.getElementById("info-title");
+    if (infoTitle) infoTitle.textContent = "Edge Info";
+    var attrs = graph.getEdgeAttributes(edgeKey);
+    var source = graph.source(edgeKey);
+    var target = graph.target(edgeKey);
+    var sAttrs = graph.getNodeAttributes(source);
+    var tAttrs = graph.getNodeAttributes(target);
+    var edgeType = attrs.edge_type || "";
+
+    var html = "";
+    html += '<div class="info-row"><span class="attr-key">edge type</span><span class="attr-val">' + infoBadge(edgeType, theme.accentYellow) + '</span></div>';
+    html += '<div class="info-row"><span class="attr-key">source</span><span class="attr-val">' + infoClickable(sAttrs.label || source, sAttrs.node_type === "domain" ? "domain" : "node", source) + ' <span style="color:' + theme.textMuted + '">(' + (sAttrs.node_type || "") + ')</span></span></div>';
+    html += '<div class="info-row"><span class="attr-key">target</span><span class="attr-val">' + infoClickable(tAttrs.label || target, tAttrs.node_type === "domain" ? "domain" : "node", target) + ' <span style="color:' + theme.textMuted + '">(' + (tAttrs.node_type || "") + ')</span></span></div>';
+
+    if (attrs.status_code) html += '<div class="info-row"><span class="attr-key">status</span><span class="attr-val">' + escapeHtml(String(attrs.status_code)) + '</span></div>';
+    if (attrs.redirect_type) html += '<div class="info-row"><span class="attr-key">redirect type</span><span class="attr-val">' + escapeHtml(attrs.redirect_type) + '</span></div>';
+    if (attrs.chain_status) html += '<div class="info-row"><span class="attr-key">chain status</span><span class="attr-val">' + escapeHtml(attrs.chain_status) + '</span></div>';
+    if (attrs.status) html += '<div class="info-row"><span class="attr-key">status</span><span class="attr-val">' + escapeHtml(attrs.status) + '</span></div>';
+    if (attrs.shared_ip) html += '<div class="info-row"><span class="attr-key">shared IP</span><span class="attr-val">' + escapeHtml(attrs.shared_ip) + '</span></div>';
+    if (attrs.shell_name) html += '<div class="info-row"><span class="attr-key">shell</span><span class="attr-val">' + escapeHtml(attrs.shell_name) + '</span></div>';
+    if (attrs.weight && Number(attrs.weight) > 1) html += '<div class="info-row"><span class="attr-key">weight</span><span class="attr-val">' + escapeHtml(String(attrs.weight)) + '</span></div>';
+
+    if (attrs.first_seen || attrs.last_seen) {
+      html += infoSection("Temporal");
+      if (attrs.first_seen) html += '<div class="info-row"><span class="attr-key">first seen</span><span class="attr-val">' + escapeHtml(attrs.first_seen) + '</span></div>';
+      if (attrs.last_seen) html += '<div class="info-row"><span class="attr-key">last seen</span><span class="attr-val">' + escapeHtml(attrs.last_seen) + '</span></div>';
+    }
+
+    infoContent.innerHTML = html;
+    infoPanel.classList.remove("hidden");
+
+    // Wire up clickable links
+    infoPanel.querySelectorAll(".info-link").forEach(function (link) {
+      link.addEventListener("click", function () {
+        var linkType = link.dataset.type;
+        var linkValue = link.dataset.value;
+        if (linkType === "domain") {
+          selectedNode = linkValue;
+          rebuildHighlightMap();
+          var pos = renderer.getNodeDisplayData(linkValue);
+          if (pos) renderer.getCamera().animate({ x: pos.x, y: pos.y, ratio: 0.3 }, { duration: 400 });
+          showNodeInfo(linkValue);
+          renderer.refresh();
+        } else if (linkType === "node") {
+          selectedNode = linkValue;
+          rebuildHighlightMap();
+          var pos2 = renderer.getNodeDisplayData(linkValue);
+          if (pos2) renderer.getCamera().animate({ x: pos2.x, y: pos2.y, ratio: 0.3 }, { duration: 400 });
+          showNodeInfo(linkValue);
+          renderer.refresh();
+        } else if (linkType === "operator") {
+          var opSelect = document.getElementById("operator-select");
+          if (opSelect) { opSelect.value = linkValue; opSelect.dispatchEvent(new Event("change")); }
+        } else if (linkType === "cluster") {
+          var clSelect = document.getElementById("cluster-select");
+          if (clSelect) { clSelect.value = linkValue; clSelect.dispatchEvent(new Event("change")); }
+        }
+      });
+    });
+  }
+
+  function findOperatorForDomain(domainKey) {
+    for (var op in operatorMap) {
+      if (operatorMap[op].has(domainKey)) return op;
+    }
+    return null;
+  }
+
+  function findClustersForDomain(domainKey) {
+    var clusters = [];
+    for (var cl in clusterMap) {
+      if (clusterMap[cl].has(domainKey)) clusters.push(cl);
+    }
+    return clusters;
+  }
+
+  function findIPsForDomain(domainKey) {
+    var ips = [];
+    graph.forEachOutNeighbor(domainKey, function (neighbor) {
+      var nAttrs = graph.getNodeAttributes(neighbor);
+      if (nAttrs.node_type === "ip_address") {
+        ips.push({ key: neighbor, address: nAttrs.label || neighbor, asn_org: nAttrs.asn_org || "" });
+      }
+    });
+    return ips;
+  }
+
+  function findNSForDomain(domainKey) {
+    var ns = [];
+    graph.forEachOutNeighbor(domainKey, function (neighbor) {
+      var nAttrs = graph.getNodeAttributes(neighbor);
+      if (nAttrs.node_type === "ns_provider") {
+        ns.push({ key: neighbor, name: nAttrs.label || neighbor });
+      }
+    });
+    return ns;
+  }
+
+  function findCoHosted(domainKey) {
+    var cohosted = [];
+    graph.forEachNeighbor(domainKey, function (neighbor) {
+      var nAttrs = graph.getNodeAttributes(neighbor);
+      if (nAttrs.node_type === "domain") {
+        // Check if connected via shares_host edge
+        var edges = graph.edges(domainKey, neighbor).concat(graph.edges(neighbor, domainKey));
+        edges.forEach(function (e) {
+          if (graph.getEdgeAttribute(e, "edge_type") === "shares_host") {
+            var ip = graph.getEdgeAttribute(e, "shared_ip") || "";
+            cohosted.push({ key: neighbor, name: nAttrs.label || neighbor, ip: ip });
+          }
+        });
+      }
+    });
+    return cohosted;
+  }
+
+  function infoClickable(label, type, value) {
+    return '<span class="info-link" data-type="' + type + '" data-value="' + escapeHtml(value) + '">' + escapeHtml(label) + '</span>';
+  }
+
+  function infoSection(title) {
+    return '<div class="info-section-title">' + escapeHtml(title) + '</div>';
+  }
+
+  function infoBadge(text, color) {
+    return '<span class="info-badge" style="background:' + color + '">' + escapeHtml(text) + '</span>';
   }
 
   function showNodeInfo(nodeKey) {
+    var infoTitle = document.getElementById("info-title");
+    if (infoTitle) infoTitle.textContent = "Node Info";
     var attrs = graph.getNodeAttributes(nodeKey);
-    var html = '<div class="info-row"><span class="attr-key">id</span><span class="attr-val">' + escapeHtml(nodeKey) + '</span></div>';
+    var html = "";
+    var nodeType = attrs.node_type || "";
 
-    var skip = new Set(["x", "y", "z", "size", "color", "viz", "hidden", "highlighted", "zIndex"]);
-    Object.keys(attrs).forEach(function (k) {
-      if (skip.has(k)) return;
-      if (attrs[k] == null || attrs[k] === "") return;
-      if (typeof attrs[k] === "object") return;
-      html += '<div class="info-row"><span class="attr-key">' + escapeHtml(k) + '</span><span class="attr-val">' + escapeHtml(String(attrs[k])) + '</span></div>';
-    });
+    // Header with node type badge
+    var typeColor = TYPE_COLORS[nodeType] || theme.textMuted;
+    html += '<div class="info-row"><span class="attr-key">id</span><span class="attr-val">' + escapeHtml(nodeKey) + '</span></div>';
+    html += '<div class="info-row"><span class="attr-key">type</span><span class="attr-val">' + infoBadge(nodeType, typeColor) + '</span></div>';
 
-    // Show neighbor count
+    if (nodeType === "domain") {
+      // Identity
+      if (attrs.status) html += '<div class="info-row"><span class="attr-key">status</span><span class="attr-val">' + escapeHtml(attrs.status) + '</span></div>';
+      if (attrs.domain_type) html += '<div class="info-row"><span class="attr-key">domain type</span><span class="attr-val">' + escapeHtml(attrs.domain_type) + '</span></div>';
+      if (attrs.registrar) html += '<div class="info-row"><span class="attr-key">registrar</span><span class="attr-val">' + escapeHtml(attrs.registrar) + '</span></div>';
+      if (attrs.creation_date) html += '<div class="info-row"><span class="attr-key">created</span><span class="attr-val">' + escapeHtml(attrs.creation_date) + '</span></div>';
+
+      // Attribution
+      html += infoSection("Attribution");
+      var op = findOperatorForDomain(nodeKey);
+      if (op) {
+        html += '<div class="info-row"><span class="attr-key">operator</span><span class="attr-val">' + infoClickable(op.replace(/^Operator-/, ""), "operator", op) + '</span></div>';
+      }
+      var clusters = findClustersForDomain(nodeKey);
+      if (clusters.length > 0) {
+        html += '<div class="info-row"><span class="attr-key">clusters</span><span class="attr-val">' + clusters.map(function (c) { return infoClickable(c, "cluster", c); }).join(", ") + '</span></div>';
+      }
+      if (attrs.escalation === "true") {
+        html += '<div class="info-row"><span class="attr-key">escalation</span><span class="attr-val">' + infoBadge("ESCALATED", theme.red) + '</span></div>';
+      }
+      if (attrs.techniques) {
+        html += '<div class="info-row"><span class="attr-key">techniques</span><span class="attr-val">' + escapeHtml(attrs.techniques) + '</span></div>';
+      }
+
+      // Infrastructure
+      var ips = findIPsForDomain(nodeKey);
+      var ns = findNSForDomain(nodeKey);
+      var cohosted = findCoHosted(nodeKey);
+      if (ips.length > 0 || ns.length > 0 || cohosted.length > 0) {
+        html += infoSection("Infrastructure");
+        ips.forEach(function (ip) {
+          html += '<div class="info-row"><span class="attr-key">IP</span><span class="attr-val">' + escapeHtml(ip.address) + (ip.asn_org ? ' <span style="color:' + theme.textMuted + '">(' + escapeHtml(ip.asn_org) + ')</span>' : '') + '</span></div>';
+        });
+        ns.forEach(function (n) {
+          html += '<div class="info-row"><span class="attr-key">NS</span><span class="attr-val">' + escapeHtml(n.name) + '</span></div>';
+        });
+        cohosted.forEach(function (ch) {
+          html += '<div class="info-row"><span class="attr-key">co-hosted</span><span class="attr-val">' + infoClickable(ch.name, "domain", ch.key) + (ch.ip ? ' <span style="color:' + theme.textMuted + '">(' + escapeHtml(ch.ip) + ')</span>' : '') + '</span></div>';
+        });
+      }
+
+      // Temporal
+      html += infoSection("Temporal");
+      if (attrs.first_seen) html += '<div class="info-row"><span class="attr-key">first seen</span><span class="attr-val">' + escapeHtml(attrs.first_seen) + '</span></div>';
+      if (attrs.last_seen) html += '<div class="info-row"><span class="attr-key">last seen</span><span class="attr-val">' + escapeHtml(attrs.last_seen) + '</span></div>';
+      if (attrs.visited) html += '<div class="info-row"><span class="attr-key">visited</span><span class="attr-val">' + escapeHtml(String(attrs.visited)) + '</span></div>';
+
+    } else if (nodeType === "resource") {
+      // Identity
+      if (attrs.status_code) html += '<div class="info-row"><span class="attr-key">status</span><span class="attr-val">' + escapeHtml(String(attrs.status_code)) + '</span></div>';
+      if (attrs.node_role) {
+        var roleColor = ROLE_COLORS[attrs.node_role] || theme.textMuted;
+        html += '<div class="info-row"><span class="attr-key">role</span><span class="attr-val">' + infoBadge(attrs.node_role.replace(/_/g, " "), roleColor) + '</span></div>';
+      }
+      if (attrs.cloaking) html += '<div class="info-row"><span class="attr-key">cloaking</span><span class="attr-val">' + infoBadge("CLOAKED", theme.red) + '</span></div>';
+
+      // Chain with role labels
+      var chain = getRedirectChain(nodeKey);
+      if (chain.length > 1) {
+        var chainHtml = chain.map(function (rid, i) {
+          var rAttrs = graph.getNodeAttributes(rid);
+          var role = rAttrs.node_role || "";
+          var roleTag = role ? infoBadge(role.replace(/_/g, " "), ROLE_COLORS[role] || theme.textMuted) + " " : "";
+          var label = rid === nodeKey ? '<b>' + escapeHtml(rid) + '</b>' : escapeHtml(rid);
+          var status = "";
+          if (i < chain.length - 1) {
+            var edges = graph.edges(rid, chain[i + 1]);
+            if (edges.length > 0) {
+              var sc = graph.getEdgeAttribute(edges[0], "status_code");
+              if (sc) status = ' <span style="color:' + theme.accentYellow + '">[' + sc + ']</span>';
+            }
+          }
+          return roleTag + label + status;
+        }).join(' &rarr; ');
+        html += '<div class="info-row" style="flex-direction:column"><span class="attr-key">redirect chain (' + chain.length + ' hops)</span><span class="attr-val" style="font-size:11px;line-height:1.6">' + chainHtml + '</span></div>';
+      }
+
+      // Temporal
+      if (attrs.first_seen) html += '<div class="info-row"><span class="attr-key">first seen</span><span class="attr-val">' + escapeHtml(attrs.first_seen) + '</span></div>';
+      if (attrs.last_seen) html += '<div class="info-row"><span class="attr-key">last seen</span><span class="attr-val">' + escapeHtml(attrs.last_seen) + '</span></div>';
+
+    } else if (nodeType === "operator") {
+      if (attrs.technique_set) html += '<div class="info-row"><span class="attr-key">techniques</span><span class="attr-val">' + escapeHtml(attrs.technique_set) + '</span></div>';
+      if (attrs.infrastructure) html += '<div class="info-row"><span class="attr-key">infrastructure</span><span class="attr-val">' + escapeHtml(attrs.infrastructure) + '</span></div>';
+      if (attrs.domain_count) html += '<div class="info-row"><span class="attr-key">domains</span><span class="attr-val">' + escapeHtml(String(attrs.domain_count)) + '</span></div>';
+
+      // Attributed domains
+      var opDomains = operatorMap[attrs.label || nodeKey];
+      if (opDomains && opDomains.size > 0) {
+        html += infoSection("Attributed Domains");
+        opDomains.forEach(function (dKey) {
+          var dAttrs = graph.getNodeAttributes(dKey);
+          html += '<div class="info-row"><span class="attr-val">' + infoClickable(dAttrs.label || dKey, "domain", dKey) + '</span></div>';
+        });
+      }
+
+      // Tokens
+      var tokens = [];
+      graph.forEachOutNeighbor(nodeKey, function (neighbor) {
+        var nAttrs = graph.getNodeAttributes(neighbor);
+        if (nAttrs.node_type === "token") tokens.push(nAttrs.label || neighbor);
+      });
+      if (tokens.length > 0) {
+        html += infoSection("Tokens");
+        tokens.forEach(function (t) {
+          html += '<div class="info-row"><span class="attr-val">' + escapeHtml(t) + '</span></div>';
+        });
+      }
+
+      if (attrs.last_active) html += '<div class="info-row"><span class="attr-key">last active</span><span class="attr-val">' + escapeHtml(attrs.last_active) + '</span></div>';
+
+    } else if (nodeType === "cluster") {
+      if (attrs.display_name) html += '<div class="info-row"><span class="attr-key">display name</span><span class="attr-val">' + escapeHtml(attrs.display_name) + '</span></div>';
+      if (attrs.status) html += '<div class="info-row"><span class="attr-key">status</span><span class="attr-val">' + escapeHtml(attrs.status) + '</span></div>';
+      if (attrs.target_sector) html += '<div class="info-row"><span class="attr-key">sector</span><span class="attr-val">' + escapeHtml(attrs.target_sector) + '</span></div>';
+      if (attrs.geography) html += '<div class="info-row"><span class="attr-key">geography</span><span class="attr-val">' + escapeHtml(attrs.geography) + '</span></div>';
+      if (attrs.is_meta === "true") html += '<div class="info-row"><span class="attr-key">type</span><span class="attr-val">' + infoBadge("META-CAMPAIGN", theme.accentCyan) + '</span></div>';
+
+      // Member domains
+      var clDomains = clusterMap[attrs.label || nodeKey];
+      if (clDomains && clDomains.size > 0) {
+        html += infoSection("Members (" + clDomains.size + " domains)");
+        clDomains.forEach(function (dKey) {
+          var dAttrs = graph.getNodeAttributes(dKey);
+          html += '<div class="info-row"><span class="attr-val">' + infoClickable(dAttrs.label || dKey, "domain", dKey) + '</span></div>';
+        });
+      }
+
+      // Parent meta-campaign
+      var parent = parentCluster[attrs.label || nodeKey];
+      if (parent) {
+        html += '<div class="info-row"><span class="attr-key">parent</span><span class="attr-val">' + infoClickable(parent, "cluster", parent) + '</span></div>';
+      }
+
+    } else if (nodeType === "ip_address") {
+      if (attrs.asn) html += '<div class="info-row"><span class="attr-key">ASN</span><span class="attr-val">' + escapeHtml(attrs.asn) + '</span></div>';
+      if (attrs.asn_org) html += '<div class="info-row"><span class="attr-key">ASN org</span><span class="attr-val">' + escapeHtml(attrs.asn_org) + '</span></div>';
+      // Domains hosted here
+      var hostedDomains = [];
+      graph.forEachInNeighbor(nodeKey, function (neighbor) {
+        var nAttrs = graph.getNodeAttributes(neighbor);
+        if (nAttrs.node_type === "domain") hostedDomains.push({ key: neighbor, name: nAttrs.label || neighbor });
+      });
+      if (hostedDomains.length > 0) {
+        html += infoSection("Hosted Domains (" + hostedDomains.length + ")");
+        hostedDomains.forEach(function (d) {
+          html += '<div class="info-row"><span class="attr-val">' + infoClickable(d.name, "domain", d.key) + '</span></div>';
+        });
+      }
+
+    } else if (nodeType === "ns_provider") {
+      var nsDomains = [];
+      graph.forEachInNeighbor(nodeKey, function (neighbor) {
+        var nAttrs = graph.getNodeAttributes(neighbor);
+        if (nAttrs.node_type === "domain") nsDomains.push({ key: neighbor, name: nAttrs.label || neighbor });
+      });
+      if (nsDomains.length > 0) {
+        html += infoSection("Domains Using This NS (" + nsDomains.length + ")");
+        nsDomains.forEach(function (d) {
+          html += '<div class="info-row"><span class="attr-val">' + infoClickable(d.name, "domain", d.key) + '</span></div>';
+        });
+      }
+
+    } else {
+      // Generic fallback for other node types
+      var skip = new Set(["x", "y", "z", "size", "color", "viz", "hidden", "highlighted", "zIndex", "node_type"]);
+      Object.keys(attrs).forEach(function (k) {
+        if (skip.has(k)) return;
+        if (attrs[k] == null || attrs[k] === "") return;
+        if (typeof attrs[k] === "object") return;
+        html += '<div class="info-row"><span class="attr-key">' + escapeHtml(k) + '</span><span class="attr-val">' + escapeHtml(String(attrs[k])) + '</span></div>';
+      });
+    }
+
+    // Connections (always shown)
     var neighbors = graph.neighbors(nodeKey).length;
     var inDeg = graph.inDegree(nodeKey);
     var outDeg = graph.outDegree(nodeKey);
     html += '<div class="info-row"><span class="attr-key">connections</span><span class="attr-val">' + neighbors + ' (in:' + inDeg + ' out:' + outDeg + ')</span></div>';
 
-    // Show redirect chain if this node is involved in one
-    var chain = getRedirectChain(nodeKey);
-    if (chain.length > 1) {
-      var chainHtml = chain.map(function (rid, i) {
-        var label = rid === nodeKey ? '<b>' + escapeHtml(rid) + '</b>' : escapeHtml(rid);
-        var status = "";
-        if (i < chain.length - 1) {
-          var edges = graph.edges(rid, chain[i + 1]);
-          if (edges.length > 0) {
-            var sc = graph.getEdgeAttribute(edges[0], "status_code");
-            if (sc) status = ' <span style="color:' + theme.accentYellow + '">[' + sc + ']</span>';
-          }
-        }
-        return label + status;
-      }).join(' → ');
-      html += '<div class="info-row" style="flex-direction:column"><span class="attr-key">redirect chain (' + chain.length + ' hops)</span><span class="attr-val" style="font-size:11px;line-height:1.6">' + chainHtml + '</span></div>';
-    }
-
     infoContent.innerHTML = html;
     infoPanel.classList.remove("hidden");
+
+    // Wire up clickable links in the panel
+    infoPanel.querySelectorAll(".info-link").forEach(function (link) {
+      link.addEventListener("click", function () {
+        var linkType = link.dataset.type;
+        var linkValue = link.dataset.value;
+
+        if (linkType === "operator") {
+          var opSelect = document.getElementById("operator-select");
+          if (opSelect) { opSelect.value = linkValue; opSelect.dispatchEvent(new Event("change")); }
+        } else if (linkType === "cluster") {
+          var clSelect = document.getElementById("cluster-select");
+          if (clSelect) { clSelect.value = linkValue; clSelect.dispatchEvent(new Event("change")); }
+        } else if (linkType === "domain") {
+          // Navigate to domain node
+          selectedNode = linkValue;
+          rebuildHighlightMap();
+          var pos = renderer.getNodeDisplayData(linkValue);
+          if (pos) {
+            renderer.getCamera().animate({ x: pos.x, y: pos.y, ratio: 0.3 }, { duration: 400 });
+          }
+          showNodeInfo(linkValue);
+          renderer.refresh();
+        }
+      });
+    });
   }
 
   // ── Context Menu (right-click) ──────────────────────────────────
@@ -2017,14 +2931,31 @@
         var v = Number(attrs.visited) || 1;
         if (v > maxVisitedCount) maxVisitedCount = v;
       });
-      initRenderer();
+      // Rebuild redirect chains from edge attributes
+      redirectNext = {};
+      redirectPrev = {};
+      graph.forEachEdge(function (edge, attrs, source, target) {
+        if (attrs.edge_type === "redirect") {
+          redirectNext[source] = target;
+          if (!redirectPrev[target]) redirectPrev[target] = source;
+        }
+      });
+      buildISAPIndexes();
+      initRenderer({ autoStartFA2: false });
     }
   }).catch(function () {}).finally(function () {
-    // Auto-connect if extension ID is saved (delay for chrome.runtime availability)
+    // Restore auto-connect preference (default to on for first visit)
+    var acPref = localStorage.getItem("hg-auto-connect");
+    autoConnectCb.checked = acPref === null ? true : acPref === "1";
+    // Auto-connect if extension ID is saved and checkbox is on
     var savedId = extIdInput.value.trim();
-    if (savedId) {
+    if (savedId && autoConnectCb.checked) {
       setTimeout(function () { connectLive(savedId); }, 500);
     }
+  });
+
+  autoConnectCb.addEventListener("change", function () {
+    localStorage.setItem("hg-auto-connect", autoConnectCb.checked ? "1" : "0");
   });
 
   // ── UI Tooltips ──────────────────────────────────────────────────

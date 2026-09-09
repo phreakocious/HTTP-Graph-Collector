@@ -365,3 +365,86 @@ input[type="checkbox"] { accent-color: var(--accent-cyan); }
   opacity: 1;
   transform: translateY(0);
 }
+
+/* Investigation section */
+#investigation-section select {
+  width: 100%;
+  padding: 5px 8px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+}
+#investigation-section select:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 8px rgba(255, 113, 206, 0.3);
+}
+#investigation-section select option {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+.investigation-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.investigation-row label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+#investigation-section h3 {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+#role-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+#role-filters label {
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+#role-filters label .role-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+/* Enhanced info panel */
+.info-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.info-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #0d0221;
+  white-space: nowrap;
+}
+.info-link {
+  color: var(--accent-cyan);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+.info-link:hover {
+  color: var(--accent-pink);
+}

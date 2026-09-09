@@ -40,6 +40,7 @@
         <button id="btn-live" data-tip="Stream HTTP requests from the extension in real time">Connect</button>
         <span id="live-status">Disconnected</span>
       </div>
+      <label data-tip="Automatically connect to the extension when the page loads (if an ID is saved)"><input type="checkbox" id="auto-connect"> Auto-connect</label>
       <p class="hint">Open the extension popup and click the extension ID to copy it.</p>
     </section>
 
@@ -132,11 +133,42 @@
       </div>
     </section>
 
+    <section id="investigation-section" class="hidden">
+      <h2>Investigation</h2>
+      <div class="investigation-row">
+        <label for="operator-select">Operator</label>
+        <select id="operator-select" data-tip="Filter to a single operator's attributed domains and infrastructure">
+          <option value="">All</option>
+        </select>
+      </div>
+      <div class="investigation-row">
+        <label for="cluster-select">Cluster</label>
+        <select id="cluster-select" data-tip="Filter to a cluster's member domains and infrastructure">
+          <option value="">All</option>
+        </select>
+      </div>
+      <div class="investigation-row">
+        <label for="color-select">Color by</label>
+        <select id="color-select" data-tip="Switch the graph coloring scheme to highlight different investigation dimensions">
+          <option value="domain">Domain</option>
+          <option value="operator">Operator</option>
+          <option value="cluster">Cluster</option>
+          <option value="role">Role</option>
+          <option value="infrastructure">Infrastructure</option>
+        </select>
+      </div>
+      <h3>Resource Roles</h3>
+      <div id="role-filters"></div>
+      <label data-tip="Show IP address and nameserver nodes, and highlight shared hosting edges"><input type="checkbox" id="infra-toggle"> Show infrastructure (IP/NS)</label>
+    </section>
+
     <section id="filter-section" class="hidden">
       <h2 data-tip="Toggle node types: client, domain, host, resource, etc.">Filter by Type</h2>
       <div id="type-filters"></div>
-      <h2 data-tip="Toggle resource groups based on content-type: scripts, styles, images, etc.">Filter by Content</h2>
-      <div id="content-filters"></div>
+      <div id="content-section">
+        <h2 data-tip="Toggle resource groups based on content-type: scripts, styles, images, etc.">Filter by Content</h2>
+        <div id="content-filters"></div>
+      </div>
       <h2 data-tip="Show or hide entire domains and their nodes">Filter by Domain</h2>
       <input type="text" id="domain-filter" placeholder="Filter domains..." data-tip="Type to narrow the domain list below">
       <div id="domain-filters"></div>
@@ -151,7 +183,7 @@
 
   <div id="info-panel" class="hidden">
     <div id="info-header">
-      <h2>Node Info</h2>
+      <h2 id="info-title">Node Info</h2>
       <span id="info-close">&times;</span>
     </div>
     <div id="info-content"></div>
