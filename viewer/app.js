@@ -319,10 +319,11 @@
       graph.forEachNeighbor(cur.node, function (neighbor) {
         if (map.has(neighbor)) return;
         var nAttrs = graph.getNodeAttributes(neighbor);
-        // Don't traverse through client nodes — they connect to everything
-        if (nAttrs.node_type === "client") return;
         map.set(neighbor, cur.depth + 1);
-        queue.push({ node: neighbor, depth: cur.depth + 1 });
+        // Include client in the map (edge highlights) but don't traverse through it
+        if (nAttrs.node_type !== "client") {
+          queue.push({ node: neighbor, depth: cur.depth + 1 });
+        }
       });
     }
     highlightMap = map;
@@ -812,12 +813,62 @@
   }
 
   // ── GEXF Loading ───────────────────────────────────────────────────
-  fileInput.addEventListener("change", function (e) {
-    const file = e.target.files[0];
+  const dropOverlay = document.getElementById("drop-overlay");
+
+  function handleFiles(files) {
+    const file = files[0];
     if (!file) return;
+    if (!file.name.endsWith(".gexf") && !file.type.includes("xml")) {
+      console.warn("Unsupported file type dropped:", file.type);
+      return;
+    }
     const reader = new FileReader();
     reader.onload = function (ev) { loadGexf(ev.target.result); };
     reader.readAsText(file);
+  }
+
+  fileInput.addEventListener("change", function (e) {
+    handleFiles(e.target.files);
+  });
+
+  // Drag and drop event listeners
+  let dragCounter = 0;
+  window.addEventListener("dragenter", function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter++;
+    dropOverlay.classList.add("active");
+    dropOverlay.classList.remove("hidden");
+  });
+
+  window.addEventListener("dragover", function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  window.addEventListener("dragleave", function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter--;
+    if (dragCounter === 0) {
+      dropOverlay.classList.remove("active");
+      setTimeout(() => {
+        if (dragCounter === 0) dropOverlay.classList.add("hidden");
+      }, 250);
+    }
+  });
+
+  window.addEventListener("drop", function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter = 0;
+    dropOverlay.classList.remove("active");
+    setTimeout(() => {
+      if (dragCounter === 0) dropOverlay.classList.add("hidden");
+    }, 250);
+    if (e.dataTransfer.files.length > 0) {
+      handleFiles(e.dataTransfer.files);
+    }
   });
 
   btnExport.addEventListener("click", function () {
@@ -1156,7 +1207,7 @@
         res.label = "";
         res.zIndex = 0;
       }
-      // Outside highlight radius during selection (no hover) → no change (subtle)
+      // Outside highlight radius during selection → leave nodes as-is
     }
 
     // Always highlight the selected node itself
@@ -1243,9 +1294,12 @@
         // Outside highlight radius during hover → dim
         res.color = theme.bgPage;
         res.zIndex = 0;
+      } else {
+        // Outside radius during selection → soft dim
+        res.color = toRGBA(sColor, 0.10);
+        res.zIndex = 0;
       }
-      // Outside radius during selection (no hover) → fall through to normal styling
-      if (sDist !== undefined || tDist !== undefined || hoveredNode) return res;
+      return res;
     }
 
     if (showInfrastructure && sharesHostPairs.has(edge)) {

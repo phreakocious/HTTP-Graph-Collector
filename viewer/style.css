@@ -448,3 +448,32 @@ input[type="checkbox"] { accent-color: var(--accent-cyan); }
 .info-link:hover {
   color: var(--accent-pink);
 }
+
+/* Drag and drop overlay */
+#drop-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(13, 2, 33, 0.85);
+  backdrop-filter: blur(8px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  border: 4px dashed var(--accent-pink);
+  margin: 10px;
+  border-radius: 20px;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+#drop-overlay.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+#drop-overlay .drop-message {
+  font-family: 'Michroma', sans-serif;
+  font-size: 24px;
+  color: var(--accent-pink);
+  text-shadow: 0 0 20px var(--accent-pink);
+  pointer-events: none;
+}
