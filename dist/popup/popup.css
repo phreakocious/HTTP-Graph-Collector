@@ -264,6 +264,22 @@ textarea::placeholder {
   transform: scale(0.98);
 }
 
+.btn-row {
+  display: flex;
+  gap: 8px;
+}
+
+.save-btn.secondary {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.save-btn.secondary:hover {
+  background: var(--border);
+  color: #fff;
+}
+
 /* Status message */
 .status-msg {
   text-align: center;
@@ -288,12 +304,6 @@ textarea::placeholder {
   color: var(--text-muted);
   font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
   cursor: pointer;
-  /* Truncate so the footer's three items fit one line; the click handler
-     copies chrome.runtime.id, not this text, so the full ID still copies. */
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   transition: color 0.15s;
 }
 

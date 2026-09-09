@@ -2828,6 +2828,25 @@
   // ── Live Mode ────────────────────────────────────────────────────
   extIdInput.value = localStorage.getItem("httpgraph-ext-id") || "";
 
+  // The extension popup's "Open Viewer" button hands the extension ID over as
+  // ?ext=<id> so it doesn't have to be copied by hand. Validate it against the
+  // Chrome extension ID shape before trusting it — it goes to
+  // chrome.runtime.connect(). Strip it from the URL afterwards so a reload or
+  // bookmark can't silently override an ID the user later typed by hand.
+  (function () {
+    var urlExtId = new URLSearchParams(location.search).get("ext");
+    if (!urlExtId) return;
+    if (/^[a-p]{32}$/.test(urlExtId)) {
+      extIdInput.value = urlExtId;
+      localStorage.setItem("httpgraph-ext-id", urlExtId);
+    } else {
+      console.warn("Ignoring malformed ext id in URL:", urlExtId);
+    }
+    var url = new URL(location.href);
+    url.searchParams.delete("ext");
+    history.replaceState(null, "", url.pathname + url.search + url.hash);
+  })();
+
   var liveReconnects = 0;
 
   function connectLive(extId) {

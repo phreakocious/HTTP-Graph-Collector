@@ -70,14 +70,35 @@ describe("popup version display", () => {
     assert.equal(stray, null, `hardcoded version in popup.html: ${stray}`);
   });
 
-  it("links the viewer origin the manifest allows to connect", () => {
-    const href = popupHtml.match(/href="(https:\/\/nullphase\.net[^"]*)"/);
-    assert.ok(href, "no nullphase.net link in popup.html");
+  it("hands the extension ID to the viewer, and the viewer reads it back", () => {
+    // The popup PRODUCES a URL param; viewer/app.js CONSUMES it. Neither half
+    // is any use alone, and nothing else in the repo couples them, so assert
+    // the handshake here — a rename on either side fails this test.
+    const viewerUrl = popupJs.match(/VIEWER_URL\s*=\s*['"]([^'"]+)['"]/);
+    assert.ok(viewerUrl, "popup.js defines no VIEWER_URL");
+
+    const param = popupJs.match(/VIEWER_URL\s*\+\s*['"]\?(\w+)=['"]/);
+    assert.ok(param, "popup.js does not append a query param to VIEWER_URL");
+
+    const viewerJs = read("../viewer/app.js");
+    assert.match(
+      viewerJs,
+      new RegExp(`\\.get\\(\\s*["']${param[1]}["']`),
+      `viewer/app.js never reads the "${param[1]}" param the popup sends`
+    );
+
+    // ...and the viewer origin must be one the extension will talk to.
     assert.ok(
       manifest.externally_connectable.matches.some((m) =>
-        new RegExp("^" + m.replace(/[.]/g, "\\.").replace(/\*/g, ".*") + "$").test(href[1])
+        new RegExp("^" + m.replace(/[.]/g, "\\.").replace(/\*/g, ".*") + "$").test(viewerUrl[1])
       ),
-      `${href[1]} is not covered by externally_connectable`
+      `${viewerUrl[1]} is not covered by externally_connectable`
     );
+  });
+
+  it("validates the incoming extension ID before connecting with it", () => {
+    // It reaches chrome.runtime.connect(), so it is a trust boundary.
+    const viewerJs = read("../viewer/app.js");
+    assert.match(viewerJs, /\[a-p\]\{32\}/, "viewer does not shape-check the ext id from the URL");
   });
 });

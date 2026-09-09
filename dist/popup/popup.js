@@ -1,3 +1,5 @@
+const VIEWER_URL = 'https://nullphase.net/hg/';
+
 const defaults = {
   rest_port: "65444",
   scrub_parameters: false,
@@ -67,6 +69,13 @@ document.addEventListener('DOMContentLoaded', function() {
   const extIdEl = document.getElementById('ext-id');
   document.getElementById('version').textContent = 'v' + chrome.runtime.getManifest().version;
   extIdEl.textContent = chrome.runtime.id;
+  // Hand the extension ID to the viewer so it doesn't have to be copied by
+  // hand. viewer/app.js reads the "ext" param on load. Keep these in step.
+  document.getElementById('open-viewer').addEventListener('click', function() {
+    chrome.tabs.create({
+      url: VIEWER_URL + '?ext=' + encodeURIComponent(chrome.runtime.id)
+    });
+  });
   extIdEl.addEventListener('click', function() {
     navigator.clipboard.writeText(chrome.runtime.id).then(function() {
       extIdEl.textContent = 'Copied!';
