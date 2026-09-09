@@ -2198,6 +2198,7 @@
         } else {
           hiddenRoles.add(role);
         }
+        updateStats();
         if (renderer) renderer.refresh();
       });
     });
@@ -2215,6 +2216,7 @@
         colorSelect.value = "domain";
       }
       buildInvestigationFocusSet();
+      updateStats();
       if (renderer) renderer.refresh();
       restartFA2IfRunning();
     });
@@ -2232,11 +2234,13 @@
         colorSelect.value = "domain";
       }
       buildInvestigationFocusSet();
+      updateStats();
       if (renderer) renderer.refresh();
       restartFA2IfRunning();
     });
 
-    // Color-by select
+    // Color-by select. No updateStats() here: this only recolours nodes, it
+    // never changes which are visible, unlike the four handlers above.
     colorSelect.addEventListener("change", function () {
       activeColorMode = colorSelect.value || "domain";
       if (renderer) renderer.refresh();
@@ -2252,6 +2256,7 @@
         activeColorMode = "domain";
         colorSelect.value = "domain";
       }
+      updateStats();
       if (renderer) renderer.refresh();
       restartFA2IfRunning();
     });
