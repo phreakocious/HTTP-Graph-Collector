@@ -2169,10 +2169,16 @@
       clSelect.appendChild(opt);
     });
 
-    // Populate role checkboxes
+    // Populate role checkboxes: the roles ROLE_DISPLAY knows about first, in
+    // that order, then any others the graph actually carries. Driving this off
+    // roleSet rather than the literal list means a role the pipeline starts
+    // emitting gets a filter instead of silently becoming unfilterable.
     roleFiltersDiv.innerHTML = "";
-    ROLE_DISPLAY.forEach(function (role) {
-      if (!roleSet[role]) return;
+    var rolesToShow = ROLE_DISPLAY.filter(function (role) { return roleSet[role]; })
+      .concat(Object.keys(roleSet).filter(function (role) {
+        return ROLE_DISPLAY.indexOf(role) === -1;
+      }).sort());
+    rolesToShow.forEach(function (role) {
       var label = document.createElement("label");
       var cb = document.createElement("input");
       cb.type = "checkbox";
