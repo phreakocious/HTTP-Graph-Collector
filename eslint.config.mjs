@@ -17,4 +17,15 @@ export default [
       "security/detect-object-injection": "off",
     },
   },
+  {
+    // The viewer pulls these three in as UMD globals from <script> tags.
+    files: ["viewer/**/*.js"],
+    languageOptions: {
+      globals: {
+        graphology: "readonly",
+        graphologyLibrary: "readonly",
+        Sigma: "readonly",
+      },
+    },
+  },
 ];

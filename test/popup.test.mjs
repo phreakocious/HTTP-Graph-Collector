@@ -59,7 +59,7 @@ describe("popup version display", () => {
   it("renders the version from the manifest, not a literal", () => {
     const dom = runPopup();
     // Fails if the line is deleted, the element id drifts, or the manifest
-    // bumps without the popup following. manifest is currently 0.6.
+    // bumps without the popup following.
     assert.equal(dom.els.get("version").textContent, "v" + manifest.version);
     assert.notEqual(manifest.version, undefined);
   });

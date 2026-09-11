@@ -18,23 +18,23 @@ Install the extension from the [Chrome Web Store](https://chromewebstore.google.
 - Right-click nodes to hide them or their neighbors
 - Size nodes by visit count (linear or logarithmic scale)
 - Hover for tooltips, click for full attribute detail
-- Export your graph as GEXF for use in Gephi or other tools
+- Export your graph as GEXF — reopen it here, or take it to Gephi
 - Handles large graphs — tested with 300K+ nodes
 
 ### GEXF File Loading
 
 Already have a GEXF file? Load it directly into the viewer without the extension. The viewer preserves colors, sizes, and all node attributes from the file.
 
-### REST API Mode
+### Offline Collection
 
-The extension also POSTs JSON request records to a configurable localhost REST API (default port 65444), compatible with the original [HTTP Graph](https://github.com/phreakocious/gephi-plugins/tree/master/modules/HttpGraph) plugin for Gephi and the included Python graph builder. Use [httpgraph-logger.py](httpgraph-logger.py) to collect records and [httpgraph-builder.py](httpgraph-builder.py) to generate GEXF files for offline analysis.
+The extension also POSTs JSON request records to a configurable localhost REST API (default port 65444). Run [httpgraph-logger.py](httpgraph-logger.py) to collect them and [httpgraph-builder.py](httpgraph-builder.py) to turn the log into a GEXF file — no Gephi required, and the viewer above will open the result. The same records are accepted by the original [HTTP Graph](https://github.com/phreakocious/gephi-plugins/tree/master/modules/HttpGraph) plugin if you do want Gephi. Nothing listening? The extension backs off after a few failed attempts and keeps probing, so leaving the port unused costs nothing.
 
 ![sample of httpgraph-logger.py output](https://github.com/phreakocious/HTTP-Graph-Collector/blob/master/httpgraph-logger_screenshot.png?raw=true)
 
 ### Collection Controls
 
 - Pause and resume collection with one click
-- Domain include/exclude lists to focus on specific sites or filter out noise
+- Domain include/exclude lists to focus on specific sites or filter out noise (an include list takes precedence — set one and the exclude list is ignored)
 - URL parameter scrubbing to reduce exposure of sensitive query strings
 - Request timing (duration in milliseconds)
 
@@ -45,3 +45,7 @@ This extension collects HTTP request metadata (URLs, status codes, content types
 ### Graph Structure
 
 Each browsed page creates a hierarchy of nodes: client → domain → host → resource, with edges representing the relationships between them. Initiator and referer data connect cross-origin dependencies. Redirects create resource-to-resource edges. Each domain gets a unique color from a 41-color palette, making clusters visually distinct.
+
+### License
+
+MIT — see [LICENSE](LICENSE).

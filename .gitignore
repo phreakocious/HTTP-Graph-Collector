@@ -3,7 +3,12 @@
 *.zip
 *.pem
 *.sublime-*
-*.json
+# Capture logs and graphs, not source. This used to be a blanket *.json, which
+# also hid every new config file in the repo -- name the artefacts instead.
+/httpgraph-requests*.json
+/smol.json
+*.gexf
+.claude/settings.local.json
 node_modules/
 .venv/
 gephi-plugins

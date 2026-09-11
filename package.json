@@ -1,9 +1,10 @@
 {
   "name": "http-graph-collector",
   "private": true,
-  "description": "Chrome extension to collect HTTP request/response data for Gephi",
+  "license": "MIT",
+  "description": "Chrome extension that graphs your HTTP traffic — live in the browser, via the bundled Python tools, or in Gephi",
   "scripts": {
-    "lint": "eslint dist/",
+    "lint": "eslint dist/ viewer/",
     "test": "node --test 'test/**/*.test.mjs'",
     "check": "npm audit && npm run lint && npm test"
   },
