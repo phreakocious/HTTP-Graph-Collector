@@ -1,9 +1,10 @@
 /*
 	httpgraph.js
-	@phreakocious - 2017-2025
+	@phreakocious - 2017-2026
 
-	Chrome extension to accompany the HTTP Graph plugin for Gephi
-	Collects minimal details from http and https request/response headers and POSTs them to a REST API as you browse
+	Collects minimal details from http and https request/response headers as you browse.
+	Streams them to the live viewer, and POSTs them to a localhost REST API for the
+	bundled Python tools or the HTTP Graph plugin for Gephi. All three are optional.
 	I'm not a JS programmer
 */
 
@@ -62,7 +63,66 @@ function domainMatches(hostname, domainList) {
 	return domainList.some(domain => hostname === domain || hostname.endsWith("." + domain));
 }
 
+// An include list wins outright: setting one disables the exclude list.
+// Unparseable URLs pass, same as before.
+function passesDomainFilter(url, items) {
+	try {
+		const hostname = new URL(url).hostname.toLowerCase();
+		const includeList = items.domain_include.split("\n").map(s => s.trim().toLowerCase()).filter(Boolean);
+		const excludeList = items.domain_exclude.split("\n").map(s => s.trim().toLowerCase()).filter(Boolean);
+
+		if (includeList.length > 0) return domainMatches(hostname, includeList);
+		if (excludeList.length > 0) return !domainMatches(hostname, excludeList);
+	} catch (_e) {
+		// If URL parsing fails, proceed anyway
+	}
+	return true;
+}
+
+// The REST backend is optional: most users only run the live viewer, and with
+// nothing listening on the port every single request cost a rejected fetch and
+// a console error. Stop trying after a run of failures; any success, or a port
+// change, arms it again.
+const REST_FAILURE_LIMIT = 5;
+const REST_RETRY_MS = 30000;
+let restFailures = 0;
+let restMutedUntil = 0;
+let restLastPort = null;
+
+async function postToBackend(url_backend, port, data) {
+	if (port !== restLastPort) { restLastPort = port; restFailures = 0; restMutedUntil = 0; }
+	// Muted, but never permanently: a logger started after the browser gets
+	// picked up on the next probe rather than needing a restart.
+	if (restMutedUntil && Date.now() < restMutedUntil) return;
+	try {
+		await fetch(url_backend, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(data) + "\r\n"
+		});
+		restFailures = 0;
+		restMutedUntil = 0;
+	} catch (error) {
+		restFailures++;
+		if (restFailures === REST_FAILURE_LIMIT) {
+			console.warn(`HTTP Graph: no REST backend on port ${port} — probing every ${REST_RETRY_MS / 1000}s instead of every request.`);
+		} else if (restFailures < REST_FAILURE_LIMIT) {
+			console.error("HTTP Graph Error: Could not send data to backend.", error);
+		}
+		if (restFailures >= REST_FAILURE_LIMIT) restMutedUntil = Date.now() + REST_RETRY_MS;
+	}
+}
+
 async function logResponse(details) {
+    // Drain the per-request maps first, before any await or early return.
+    // These are populated unconditionally by onBeforeRequest, so returning
+    // early (paused, or domain-filtered) used to leave every entry behind and
+    // grow both maps for the life of the service worker.
+    const startTime = requestTimings.get(details.requestId);
+    const initiator = requestInitiators.get(details.requestId);
+    requestTimings.delete(details.requestId);
+    requestInitiators.delete(details.requestId);
+
     // Get settings from storage every time, as the service worker can be terminated.
     const items = await chrome.storage.local.get({
         rest_port: default_rest_port,
@@ -80,20 +140,7 @@ async function logResponse(details) {
     // Avoid feedback loop and internal browser requests
  	if ( details.url.startsWith(url_backend) || details.tabId < 0 ) return;
 
-    // Domain filtering
-    try {
-        const hostname = new URL(details.url).hostname;
-        const includeList = items.domain_include.split("\n").map(s => s.trim().toLowerCase()).filter(Boolean);
-        const excludeList = items.domain_exclude.split("\n").map(s => s.trim().toLowerCase()).filter(Boolean);
-
-        if (includeList.length > 0) {
-            if (!domainMatches(hostname.toLowerCase(), includeList)) return;
-        } else if (excludeList.length > 0) {
-            if (domainMatches(hostname.toLowerCase(), excludeList)) return;
-        }
-    } catch (_e) {
-        // If URL parsing fails, proceed anyway
-    }
+    if (!passesDomainFilter(details.url, items)) return;
 
 	const headers = details.responseHeaders;
 	let data = {
@@ -106,17 +153,13 @@ async function logResponse(details) {
 	};
 
     // Compute request duration if we have a start time
-    const startTime = requestTimings.get(details.requestId);
     if (startTime !== undefined) {
         data.duration_ms = Math.round(details.timeStamp - startTime);
-        requestTimings.delete(details.requestId);
     }
 
     // Attach initiator origin if captured from onBeforeRequest
-    const initiator = requestInitiators.get(details.requestId);
     if (initiator) {
         data.initiator = initiator;
-        requestInitiators.delete(details.requestId);
     }
 
 	for (const header of headers) {
@@ -149,19 +192,8 @@ async function logResponse(details) {
 
     const finalData = await finalizeAndSend;
 
-    try {
-        await fetch(url_backend, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(finalData) + "\r\n"
-        });
-    } catch (error) {
-        console.error("HTTP Graph Error: Could not send data to backend.", error);
-    }
-
     broadcastToViewers(finalData);
+    await postToBackend(url_backend, items.rest_port, finalData);
 }
 
 const requestFilter = { urls: [ "http://*/*", "https://*/*" ] };
@@ -197,19 +229,7 @@ chrome.webRequest.onBeforeRedirect.addListener(
 		if (details.url.startsWith(url_backend) || details.tabId < 0) return;
 
 		// Domain filtering on the source URL
-		try {
-			const hostname = new URL(details.url).hostname;
-			const includeList = items.domain_include.split("\n").map(s => s.trim().toLowerCase()).filter(Boolean);
-			const excludeList = items.domain_exclude.split("\n").map(s => s.trim().toLowerCase()).filter(Boolean);
-
-			if (includeList.length > 0) {
-				if (!domainMatches(hostname.toLowerCase(), includeList)) return;
-			} else if (excludeList.length > 0) {
-				if (domainMatches(hostname.toLowerCase(), excludeList)) return;
-			}
-		} catch (_e) {
-			// If URL parsing fails, proceed anyway
-		}
+		if (!passesDomainFilter(details.url, items)) return;
 
 		const data = {
 			edge_type: "redirect",
@@ -222,17 +242,8 @@ chrome.webRequest.onBeforeRedirect.addListener(
 			type: details.type
 		};
 
-		try {
-			await fetch(url_backend, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(data) + "\r\n"
-			});
-		} catch (error) {
-			console.error("HTTP Graph Error: Could not send redirect data to backend.", error);
-		}
-
 		broadcastToViewers(data);
+		await postToBackend(url_backend, items.rest_port, data);
 	},
 	requestFilter,
 	[ "responseHeaders" ]
