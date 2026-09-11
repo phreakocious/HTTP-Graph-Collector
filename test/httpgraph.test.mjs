@@ -9,10 +9,44 @@ const src = readFileSync(
   "utf-8"
 );
 
-// Build a minimal sandbox with stubbed Chrome APIs so the top-level
-// listeners in httpgraph.js don't throw when the script is evaluated.
-// Wrap the source in an IIFE that returns the functions we want to test,
-// since const/let declarations don't become context properties in vm.
+// Stubbed Chrome APIs. Every addListener captures its callback in
+// chrome.listeners so a test can fire the shipped handler directly.
+function makeChrome(over = {}) {
+  const listeners = {};
+  const capture = (name) => ({ addListener: (fn) => { listeners[name] = fn; } });
+  return {
+    listeners,
+    action: { setBadgeText: () => {}, setBadgeBackgroundColor: () => {} },
+    storage: { local: { get: () => Promise.resolve({}), set: () => {} } },
+    tabs: { get: (_id, cb) => cb(null) },
+    webRequest: {
+      onBeforeRequest: capture("onBeforeRequest"),
+      onBeforeRedirect: capture("onBeforeRedirect"),
+      onCompleted: capture("onCompleted"),
+      onErrorOccurred: capture("onErrorOccurred"),
+    },
+    runtime: {
+      lastError: null,
+      onInstalled: capture("onInstalled"),
+      onStartup: capture("onStartup"),
+      onConnectExternal: capture("onConnectExternal"),
+    },
+    ...over,
+  };
+}
+
+// Mirrors chrome.storage.local.get(defaults): stored keys win, defaults fill the rest.
+function makeStorage(stored, written = []) {
+  return { local: {
+    get: (defaults) => Promise.resolve({ ...defaults, ...stored }),
+    set: (obj) => { written.push(obj); return Promise.resolve(); },
+  } };
+}
+
+// Build a minimal sandbox so the top-level listeners in httpgraph.js don't
+// throw when the script is evaluated. Wrap the source in an IIFE that returns
+// the functions we want to test, since const/let declarations don't become
+// context properties in vm.
 function loadModule(overrides = {}) {
   const ctx = createContext({
     console: { log: () => {}, warn: () => {}, error: () => {} },
@@ -26,32 +60,18 @@ function loadModule(overrides = {}) {
     fetch: () => {},
     setTimeout: () => {},
     ...overrides,
-    chrome: overrides.chrome || {
-      action: { setBadgeText: () => {}, setBadgeBackgroundColor: () => {} },
-      storage: { local: { get: () => Promise.resolve({}), set: () => {} } },
-      tabs: { get: (_id, cb) => cb(null) },
-      webRequest: {
-        onBeforeRequest: { addListener: () => {} },
-        onBeforeRedirect: { addListener: () => {} },
-        onCompleted: { addListener: () => {} },
-        onErrorOccurred: { addListener: () => {} },
-      },
-      runtime: {
-        onInstalled: { addListener: () => {} },
-        onStartup: { addListener: () => {} },
-        onConnectExternal: { addListener: () => {} },
-      },
-    },
+    chrome: overrides.chrome || makeChrome(),
   });
 
   // Wrap source so we can extract const-declared values.
   // The IIFE runs the original source then returns the targets.
-  const wrapped = `(function() {\n${src}\nreturn { cyrb53, domainMatches, scrubber, passesDomainFilter, postToBackend, logResponse, requestTimings, requestInitiators };\n})()`;
+  const wrapped = `(function() {\n${src}\nreturn { cyrb53, domainMatches, scrubUrl, passesDomainFilter, postToBackend, logResponse, requestTimings, requestInitiators };\n})()`;
   const script = new Script(wrapped, { filename: "httpgraph.js" });
   return script.runInContext(ctx);
 }
 
-const { cyrb53, domainMatches, scrubber, passesDomainFilter } = loadModule();
+const { cyrb53, domainMatches, scrubUrl, passesDomainFilter } = loadModule();
+
 
 // ---------- cyrb53 ----------
 
@@ -108,32 +128,27 @@ describe("domainMatches", () => {
   });
 });
 
-// ---------- scrubber ----------
+// ---------- scrubUrl ----------
 
-describe("scrubber", () => {
-  it("replaces query string with SCRUBBED_hash", () => {
-    const result = scrubber("?key=value", "key=value", 0, "");
-    assert.match(result, /^\?SCRUBBED_hash=\d+$/);
-  });
-
-  it("produces consistent hashes for same query", () => {
-    const r1 = scrubber("?a=1", "a=1", 0, "");
-    const r2 = scrubber("?a=1", "a=1", 0, "");
-    assert.equal(r1, r2);
-  });
-
-  it("produces different hashes for different queries", () => {
-    const r1 = scrubber("?a=1", "a=1", 0, "");
-    const r2 = scrubber("?b=2", "b=2", 0, "");
-    assert.notEqual(r1, r2);
-  });
-
-  it("works with String.replace as intended", () => {
-    const url = "https://example.com/path?secret=abc&token=xyz";
-    const scrubbed = url.replace(/\?(.*)/, scrubber);
+describe("scrubUrl", () => {
+  it("replaces the query string with a hash", () => {
+    const scrubbed = scrubUrl("https://example.com/path?secret=abc&token=xyz");
     assert.match(scrubbed, /^https:\/\/example\.com\/path\?SCRUBBED_hash=\d+$/);
   });
+
+  it("is stable for the same query and distinct for different ones", () => {
+    // The old scrubber hashed the regex match offset, not the query, so every
+    // query on a resource collapsed to one constant. Tested through the real
+    // replace call, not a regex copied into the test.
+    assert.equal(scrubUrl("https://e.com/p?a=1"), scrubUrl("https://e.com/p?a=1"));
+    assert.notEqual(scrubUrl("https://e.com/p?a=1"), scrubUrl("https://e.com/p?a=2"));
+  });
+
+  it("leaves a URL without a query alone", () => {
+    assert.equal(scrubUrl("https://example.com/path"), "https://example.com/path");
+  });
 });
+
 
 // ---------- passesDomainFilter ----------
 
@@ -233,32 +248,20 @@ describe("logResponse request-map cleanup", () => {
   // onBeforeRequest populates these maps for EVERY request, unconditionally.
   // If logResponse returns early without draining them they grow for the life
   // of the service worker — which pausing collection used to do on every hit.
-  function harness(settings) {
+    function harness(settings) {
     const sent = [];
     const mod = loadModule({
       fetch: (_url, opts) => { sent.push(JSON.parse(opts.body)); return Promise.resolve({}); },
-      chrome: {
-        action: { setBadgeText: () => {}, setBadgeBackgroundColor: () => {} },
-        storage: { local: { get: () => Promise.resolve(settings), set: () => {} } },
-        tabs: { get: (_id, cb) => cb({ url: "https://referer.example/page" }) },
-        webRequest: {
-          onBeforeRequest: { addListener: () => {} },
-          onBeforeRedirect: { addListener: () => {} },
-          onCompleted: { addListener: () => {} },
-          onErrorOccurred: { addListener: () => {} },
-        },
-        runtime: {
-          lastError: null,
-          onInstalled: { addListener: () => {} },
-          onStartup: { addListener: () => {} },
-          onConnectExternal: { addListener: () => {} },
-        },
-      },
+      chrome: makeChrome({
+        storage: makeStorage(settings),
+        tabs: { get: (_id, cb) => cb({ url: "https://referer.example/page?tab=1" }) },
+      }),
     });
     mod.requestTimings.set("req-1", 1000);
     mod.requestInitiators.set("req-1", "https://initiator.example");
     return { mod, sent };
   }
+
 
   const details = {
     requestId: "req-1",
@@ -301,8 +304,90 @@ describe("logResponse request-map cleanup", () => {
     assert.equal(h.sent.length, 1);
     // The drained values must still reach the record, or the refactor that
     // moved the reads up would silently drop timing and initiator data.
-    assert.equal(h.sent[0].duration_ms, 250);
+        assert.equal(h.sent[0].duration_ms, 250);
     assert.equal(h.sent[0].initiator, "https://initiator.example");
     assert.equal(h.sent[0].content_type, "application/javascript");
+  });
+
+  it("scrubs the URL and the referer, and keeps different queries distinct", async () => {
+    const h = harness(settings({ scrub_parameters: true }));
+    await h.mod.logResponse({ ...details, url: "https://tracked.example/a?q=1" });
+    await h.mod.logResponse({ ...details, url: "https://tracked.example/a?q=2" });
+    assert.match(h.sent[0].url, /^https:\/\/tracked\.example\/a\?SCRUBBED_hash=\d+$/);
+    assert.match(h.sent[0].referer, /^https:\/\/referer\.example\/page\?SCRUBBED_hash=\d+$/);
+    assert.notEqual(h.sent[0].url, h.sent[1].url, "two queries on one resource must not hash alike");
+  });
+});
+
+// ---------- onInstalled ----------
+
+describe("onInstalled", () => {
+  // Fires on updates too. The old listener wrote every default unconditionally,
+  // so upgrading un-paused collection, turned scrubbing off and wiped the lists.
+  const chosen = { rest_port: "55555", scrub_parameters: true, collecting: false, domain_include: "", domain_exclude: "ads.net" };
+  const defaults = { rest_port: "65444", scrub_parameters: false, collecting: true, domain_include: "", domain_exclude: "" };
+
+  function harness(stored) {
+    const written = [];
+    const badge = [];
+    const chrome = makeChrome({
+      storage: makeStorage(stored, written),
+      action: { setBadgeText: (o) => badge.push(o.text), setBadgeBackgroundColor: () => {} },
+    });
+    loadModule({ chrome });
+    return { fire: chrome.listeners.onInstalled, written, badge };
+  }
+
+  it("keeps every user setting across an update", async () => {
+    const h = harness(chosen);
+    await h.fire({ reason: "update", previousVersion: "0.6" });
+    assert.deepEqual(h.written, [chosen]);
+    assert.deepEqual(h.badge, ["OFF"], "badge must reflect the kept paused state, not the default");
+  });
+
+  it("writes the defaults on a clean install", async () => {
+    const h = harness({});
+    await h.fire({ reason: "install" });
+    assert.deepEqual(h.written, [defaults]);
+    assert.deepEqual(h.badge, [""]);
+  });
+});
+
+// ---------- onBeforeRedirect ----------
+
+describe("onBeforeRedirect", () => {
+  const redirect = {
+    requestId: "r1", tabId: 3, timeStamp: 1, statusCode: 302, method: "GET", type: "main_frame", ip: "10.0.0.1",
+    url: "https://example.com/login?source=secret1",
+    redirectUrl: "https://example.com/cb?token=secret2",
+  };
+
+  function harness(scrub) {
+    const sent = [];
+    const chrome = makeChrome({ storage: makeStorage({ scrub_parameters: scrub }) });
+    loadModule({
+      chrome,
+      fetch: (_url, opts) => { sent.push(JSON.parse(opts.body)); return Promise.resolve({}); },
+    });
+    return { fire: chrome.listeners.onBeforeRedirect, sent };
+  }
+
+  it("scrubs both ends of a redirect when scrubbing is on", async () => {
+    // The redirect record used to skip scrubbing entirely, leaking auth
+    // callback codes that scrubbing the eventual completed request cannot undo.
+    const h = harness(true);
+    await h.fire(redirect);
+    assert.equal(h.sent.length, 1);
+    assert.equal(h.sent[0].edge_type, "redirect");
+    assert.match(h.sent[0].url, /^https:\/\/example\.com\/login\?SCRUBBED_hash=\d+$/);
+    assert.match(h.sent[0].redirect_url, /^https:\/\/example\.com\/cb\?SCRUBBED_hash=\d+$/);
+    assert.ok(!JSON.stringify(h.sent[0]).includes("secret"), "no secret may survive in the record");
+  });
+
+  it("sends both URLs verbatim when scrubbing is off", async () => {
+    const h = harness(false);
+    await h.fire(redirect);
+    assert.equal(h.sent[0].url, redirect.url);
+    assert.equal(h.sent[0].redirect_url, redirect.redirectUrl);
   });
 });

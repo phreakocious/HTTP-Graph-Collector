@@ -86,9 +86,16 @@ class GraphBuilder:
         return hashlib.sha256((src_id + dst_id).encode()).hexdigest()[:16]
 
     def add_node(self, node_id, node_type, domain, size, label=None, **attrs):
-        """Add a node if it doesn't exist (FIRST wins). Increment visited count."""
+        """Add a node if it doesn't exist (FIRST wins). Increment visited count.
+
+        An existing node still picks up attributes it lacks: a redirect target is
+        created bare, and its own response -- status, method, bytes -- comes later.
+        """
         if node_id in self.G:
-            self.G.nodes[node_id]["visited"] = self.G.nodes[node_id].get("visited", 1) + 1
+            node = self.G.nodes[node_id]
+            node["visited"] = node.get("visited", 1) + 1
+            for key, value in attrs.items():
+                node.setdefault(key, value)
             return
         color = self.assign_color(domain)
         if label is None:
@@ -103,8 +110,12 @@ class GraphBuilder:
             **attrs,
         )
 
-    def add_edge(self, src_id, dst_id):
-        """Add a directed edge, incrementing weight on duplicates. Skip self-loops."""
+    def add_edge(self, src_id, dst_id, **attrs):
+        """Add a directed edge, incrementing weight on duplicates. Skip self-loops.
+
+        Extra attributes (edge_type, status_code) are set on creation and
+        backfilled on an existing edge; the first value wins, as for nodes.
+        """
         if src_id == dst_id:
             return
         # both nodes must exist
@@ -113,11 +124,14 @@ class GraphBuilder:
         edge_key = (src_id, dst_id)
         if edge_key in self.edge_weights:
             self.edge_weights[edge_key] += 1
-            self.G[src_id][dst_id]["weight"] = self.edge_weights[edge_key]
+            edge = self.G[src_id][dst_id]
+            edge["weight"] = self.edge_weights[edge_key]
+            for key, value in attrs.items():
+                edge.setdefault(key, value)
         else:
             self.edge_weights[edge_key] = 1
             eid = self.make_edge_id(src_id, dst_id)
-            self.G.add_edge(src_id, dst_id, id=eid, weight=1)
+            self.G.add_edge(src_id, dst_id, id=eid, weight=1, **attrs)
 
     def _ensure_resource_hierarchy(self, url_str):
         """Parse a URL and ensure its domain, host, and resource nodes exist.
@@ -286,9 +300,13 @@ class GraphBuilder:
         if not src or not dst:
             return
 
-        src_resource_id = src[0]
-        dst_resource_id = dst[0]
-        self.add_edge(src_resource_id, dst_resource_id)
+        # Same schema as the live viewer's builder, so a GEXF from here gets
+        # redirect styling and chain traversal when loaded there.
+        self.add_edge(
+            src[0], dst[0],
+            edge_type="redirect",
+            status_code=record.get("status") or 0,
+        )
 
     def write_gexf(self, output_path):
         """Write the graph to a GEXF file."""

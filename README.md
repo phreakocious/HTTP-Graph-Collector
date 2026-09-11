@@ -48,7 +48,7 @@ Opening the viewer at `nullphase.net/hg` pulls the page and the app itself, and 
 
 ### Graph Structure
 
-Each browsed page creates a hierarchy of nodes: client → domain → host → resource, with edges representing the relationships between them. Initiator and referer data connect cross-origin dependencies. Redirects create resource-to-resource edges. Each domain gets a unique color from a 41-color palette, making clusters visually distinct.
+Each browsed page creates a hierarchy of nodes: client → domain → host → resource, with edges representing the relationships between them. Initiator and referer data connect cross-origin dependencies. Redirects create resource-to-resource edges. Each domain gets its own color, so clusters stand apart: the viewer hashes the domain name onto a cyan-to-yellow gradient, and the Python and Gephi tools draw from a 41-color palette.
 
 ### License
 

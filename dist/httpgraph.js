@@ -8,11 +8,13 @@
 	I'm not a JS programmer
 */
 
-const default_rest_port = "65444";
-const default_scrub_parameters = false;
-const default_collecting = true;
-const default_domain_include = "";
-const default_domain_exclude = "";
+const DEFAULT_SETTINGS = {
+    rest_port: "65444",
+    scrub_parameters: false,
+    collecting: true,
+    domain_include: "",
+    domain_exclude: ""
+};
 
 // Request timing map — stores start times keyed by requestId
 const requestTimings = new Map();
@@ -46,8 +48,11 @@ const cyrb53 = (str, seed = 42) => {
     return 4294967296 * (2097151 & h2) + (h1 >>> 0);
 };
 
-function scrubber(match, p1, _offset, _string) {
-	return "?SCRUBBED_hash=" + cyrb53(p1);
+// Replace the query string with a hash of it: the URL stays distinct without
+// carrying its parameters. Every emitted URL goes through here when scrubbing
+// is on -- request, referer, and both ends of a redirect.
+function scrubUrl(url) {
+    return url.replace(/\?.*/, (query) => "?SCRUBBED_hash=" + cyrb53(query.slice(1)));
 }
 
 function updateBadge(collecting) {
@@ -124,13 +129,7 @@ async function logResponse(details) {
     requestInitiators.delete(details.requestId);
 
     // Get settings from storage every time, as the service worker can be terminated.
-    const items = await chrome.storage.local.get({
-        rest_port: default_rest_port,
-        scrub_parameters: default_scrub_parameters,
-        collecting: default_collecting,
-        domain_include: default_domain_include,
-        domain_exclude: default_domain_exclude
-    });
+    const items = await chrome.storage.local.get(DEFAULT_SETTINGS);
 
     // If collection is paused, do nothing
     if (!items.collecting) return;
@@ -181,10 +180,8 @@ async function logResponse(details) {
             }
 
             if (items.scrub_parameters) {
-                data.url = data.url.replace(/\?.*/, scrubber);
-                if (data.referer) {
-                    data.referer = data.referer.replace(/\?.*/, scrubber);
-                }
+                data.url = scrubUrl(data.url);
+                if (data.referer) data.referer = scrubUrl(data.referer);
             }
             resolve(data);
         });
@@ -216,14 +213,9 @@ chrome.webRequest.onCompleted.addListener(
 
 chrome.webRequest.onBeforeRedirect.addListener(
 	async (details) => {
-		const items = await chrome.storage.local.get({
-			rest_port: default_rest_port,
-			collecting: default_collecting,
-			domain_include: default_domain_include,
-			domain_exclude: default_domain_exclude
-		});
+		const items = await chrome.storage.local.get(DEFAULT_SETTINGS);
 
-		if (!items.collecting) return;
+        if (!items.collecting) return;
 
 		const url_backend = `http://127.0.0.1:${items.rest_port}/add_record`;
 		if (details.url.startsWith(url_backend) || details.tabId < 0) return;
@@ -240,9 +232,14 @@ chrome.webRequest.onBeforeRedirect.addListener(
 			method: details.method,
 			status: details.statusCode,
 			type: details.type
-		};
+        };
 
-		broadcastToViewers(data);
+        if (items.scrub_parameters) {
+            data.url = scrubUrl(data.url);
+            data.redirect_url = scrubUrl(data.redirect_url);
+        }
+
+        broadcastToViewers(data);
 		await postToBackend(url_backend, items.rest_port, data);
 	},
 	requestFilter,
@@ -257,20 +254,18 @@ chrome.webRequest.onErrorOccurred.addListener(
 	requestFilter
 );
 
-chrome.runtime.onInstalled.addListener(() => {
-	chrome.storage.local.set({
-		rest_port: default_rest_port,
-		scrub_parameters: default_scrub_parameters,
-		collecting: default_collecting,
-		domain_include: default_domain_include,
-		domain_exclude: default_domain_exclude
-	});
-	updateBadge(default_collecting);
+// Fires on every update as well as the first install. get() fills in only the
+// keys that are missing, so a user who paused collection or narrowed it keeps
+// that across an upgrade instead of silently going back to collecting everything.
+chrome.runtime.onInstalled.addListener(async () => {
+    const items = await chrome.storage.local.get(DEFAULT_SETTINGS);
+    await chrome.storage.local.set(items);
+    updateBadge(items.collecting);
 });
 
 chrome.runtime.onStartup.addListener(async () => {
-	const items = await chrome.storage.local.get({ collecting: default_collecting });
-	updateBadge(items.collecting);
+    const items = await chrome.storage.local.get(DEFAULT_SETTINGS);
+    updateBadge(items.collecting);
 });
 
 // ── Live Viewer Streaming ──

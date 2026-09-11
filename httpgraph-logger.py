@@ -62,16 +62,22 @@ class Server(BaseHTTPRequestHandler):
         Server.response_count = 0
 
     def do_POST(self):
+        try:
+            body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            response_code = int(json.loads(body)["status"])
+        except (ValueError, KeyError, TypeError):
+            self.send_error(400, "expected a JSON record with a status field")
+            return
+        Server.count_response(response_code)
+        logging.info(body.decode("utf-8", "replace").rstrip("\n"))
         self.send_response(200)
         self.end_headers()
 
-    # this function is called by the web server for every request
+    # The record file IS the log; keep the per-request stderr line quiet.
+    # (This used to parse the POST body, so any GET or malformed request
+    # raised inside the logging hook instead of getting an HTTP error.)
     def log_message(self, format, *args):
-        post_length = int(self.headers["Content-Length"])
-        post_body = self.rfile.read(post_length)
-        response_code = int(json.loads(post_body)["status"])
-        Server.count_response(response_code)
-        logging.info(post_body.decode("utf-8").rstrip("\n"))
+        pass
 
 
 class SparksPrinter(Thread):

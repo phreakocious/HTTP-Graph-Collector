@@ -82,7 +82,6 @@
   function LiveGraphBuilder(g) {
     this.graph = g;
     this.colormap = {};
-    this.edgeWeights = {};
   }
 
   LiveGraphBuilder.prototype.assignColor = function (domain) {
@@ -147,24 +146,44 @@
     originalSizes[nodeId] = size;
   };
 
+  // One edge per (src, dst) and orientation: weights add up, every other
+  // attribute keeps its first value (a redirect seen on an edge that already
+  // exists types it). directedEdge(src, dst) is the directed key; edges(src,
+  // dst) also returned dst→src, and listed the reverse edge first.
+  // `undirected` is the edge's own orientation in a mixed graph (the fold
+  // passes it); the viewer's own edges take the graph's type.
+  function accumulateEdge(g, srcId, dstId, attrs, undirected) {
+    attrs = attrs || {};
+    if (undirected == null) undirected = g.type === "undirected";
+    var edge = undirected ? g.undirectedEdge(srcId, dstId) : g.directedEdge(srcId, dstId);
+    if (!edge) {
+      g[undirected ? "addUndirectedEdge" : "addDirectedEdge"](srcId, dstId, Object.assign({ weight: 1 }, attrs));
+      return;
+    }
+    g.setEdgeAttribute(edge, "weight", (Number(g.getEdgeAttribute(edge, "weight")) || 1) + (Number(attrs.weight) || 1));
+    for (var k in attrs) {
+      if (k !== "weight" && g.getEdgeAttribute(edge, k) == null) g.setEdgeAttribute(edge, k, attrs[k]);
+    }
+  }
+
+  // The GEXF parser builds a multigraph when a file has parallel edges (other
+  // tools' exports; the Python builder never writes them). graph.edge() throws
+  // on multigraphs, so fold each parallel set into one edge first, keeping
+  // each edge's own orientation (a mixed file can hold both kinds).
+  function foldParallelEdges(g) {
+    if (!g.multi) return g;
+    var simple = new Graph({ type: g.type });
+    g.forEachNode(function (key, attrs) { simple.addNode(key, attrs); });
+    g.forEachEdge(function (_edge, attrs, source, target, _sa, _ta, undirected) {
+      accumulateEdge(simple, source, target, attrs, undirected);
+    });
+    return simple;
+  }
+
   LiveGraphBuilder.prototype.addEdge = function (srcId, dstId, attrs) {
     if (srcId === dstId) return;
     if (!this.graph.hasNode(srcId) || !this.graph.hasNode(dstId)) return;
-    var key = srcId + "\t" + dstId;
-    if (this.edgeWeights[key]) {
-      this.edgeWeights[key]++;
-      var edges = this.graph.edges(srcId, dstId);
-      if (edges.length > 0) this.graph.setEdgeAttribute(edges[0], "weight", this.edgeWeights[key]);
-    } else if (this.graph.hasEdge(srcId, dstId)) {
-      var existing = this.graph.edges(srcId, dstId);
-      this.edgeWeights[key] = (this.graph.getEdgeAttribute(existing[0], "weight") || 1) + 1;
-      this.graph.setEdgeAttribute(existing[0], "weight", this.edgeWeights[key]);
-    } else {
-      this.edgeWeights[key] = 1;
-      var edgeAttrs = { weight: 1 };
-      if (attrs) Object.assign(edgeAttrs, attrs);
-      this.graph.addEdge(srcId, dstId, edgeAttrs);
-    }
+    accumulateEdge(this.graph, srcId, dstId, attrs);
   };
 
   LiveGraphBuilder.prototype.ensureHierarchy = function (url) {
@@ -572,7 +591,15 @@
 
   var bundlePositions = {}; // bundleId → {x, y}
 
+  // Returns whether the set of collapsed resources changed, i.e. whether the
+  // visible node set differs from before. The layout graph is a snapshot of
+  // that set, so a running layout must be rebuilt when this is true.
   function rebuildBundles() {
+    var before = new Set(bundledResources);
+    function membershipChanged() {
+      return before.size !== bundledResources.size ||
+        !Array.from(before).every(function (k) { return bundledResources.has(k); });
+    }
     // Save positions and remove existing bundle nodes
     var toRemove = [];
     graph.forEachNode(function (key, attrs) {
@@ -584,7 +611,7 @@
     toRemove.forEach(function (k) { graph.dropNode(k); });
     bundledResources.clear();
 
-    if (!bundleEnabled) return;
+    if (!bundleEnabled) return membershipChanged();
 
     // Group resources by host
     var hostResources = {};
@@ -635,23 +662,29 @@
       }
     }
 
-    // Second pass: redirect external edges to bundle nodes.
-    // For each bundled resource, find neighbors outside its host and
-    // create a single weighted edge from that neighbor to the bundle.
-    bundledResources.forEach(function (rid) {
-      var host = hostOfResource(rid);
-      var bundleId = "bundle:" + host;
-      if (!graph.hasNode(bundleId)) return;
-      graph.forEachNeighbor(rid, function (neighbor) {
-        if (neighbor === host) return;
-        if (bundledResources.has(neighbor)) return;
-        var nAttrs = graph.getNodeAttributes(neighbor);
-        if (nAttrs.node_type === "bundle") return;
-        // Create or increment weighted edge from neighbor to bundle
-        if (graph.hasEdge(neighbor, bundleId) || graph.hasEdge(bundleId, neighbor)) return;
-        graph.addEdge(neighbor, bundleId, { weight: 1 });
-      });
+    // Second pass: project every edge that touches a bundled resource onto the
+    // bundle node, keeping direction and redirect attributes and summing
+    // weights. Both ends may be bundled (a redirect between two collapsed
+    // hosts); the old neighbor walk dropped that edge and reversed the rest.
+    var projected = [];
+    graph.forEachEdge(function (edge, attrs, source, target) {
+      if (!bundledResources.has(source) && !bundledResources.has(target)) return;
+      var s = bundledResources.has(source) ? "bundle:" + hostOfResource(source) : source;
+      var t = bundledResources.has(target) ? "bundle:" + hostOfResource(target) : target;
+      if (s === t) return;                                    // inside one bundle
+      if (s === "bundle:" + t || t === "bundle:" + s) return;  // host ↔ its own bundle, added above
+      projected.push({ s: s, t: t, attrs: attrs });
     });
+    projected.forEach(function (p) {
+      if (!graph.hasNode(p.s) || !graph.hasNode(p.t)) return;
+      // Members joining an existing projection add their weight and fill in
+      // redirect metadata the earlier ones lacked, in either visiting order.
+      var eAttrs = { weight: Number(p.attrs.weight) || 1 };
+      if (p.attrs.edge_type) eAttrs.edge_type = p.attrs.edge_type;
+      if (p.attrs.status_code) eAttrs.status_code = p.attrs.status_code;
+      accumulateEdge(graph, p.s, p.t, eAttrs);
+    });
+    return membershipChanged();
   }
 
   // ── IndexedDB persistence ─────────────────────────────────────────
@@ -942,10 +975,26 @@
     labelMap = {};
   }
 
+  // Redirect chains come from edge attributes on every path that hands a graph
+  // to initRenderer (file import, IndexedDB restore, live connect); live records
+  // then extend them. Runs AFTER resetGraphState, which empties both maps --
+  // the callers used to build them first and lose them here.
+  function rebuildRedirectIndex() {
+    redirectNext = {};
+    redirectPrev = {};
+    graph.forEachEdge(function (edge, attrs, source, target) {
+      if (attrs.edge_type !== "redirect") return;
+      if (source.indexOf("bundle:") === 0 || target.indexOf("bundle:") === 0) return; // projected, see rebuildBundles
+      redirectNext[source] = target;
+      if (!redirectPrev[target]) redirectPrev[target] = source;
+    });
+  }
+
   function initRenderer(opts) {
     opts = opts || {};
     if (renderer) { renderer.kill(); renderer = null; }
     resetGraphState();
+    rebuildRedirectIndex();
     rebuildBundles();
     updateHiddenCount();
 
@@ -999,7 +1048,7 @@
     stopFA2();
     killFA2Worker();
 
-    graph = graphologyLibrary.gexf.parse(Graph, xmlString);
+    graph = foldParallelEdges(graphologyLibrary.gexf.parse(Graph, xmlString));
 
     graph.forEachNode(function (key, attrs) {
       if (attrs.type != null) {
@@ -1021,19 +1070,10 @@
 
     originalSizes = {};
     maxVisitedCount = 1;
-    redirectNext = {};
-    redirectPrev = {};
     graph.forEachNode(function (key, attrs) {
       originalSizes[key] = attrs.size || 3;
       var v = Number(attrs.visited) || 1;
       if (v > maxVisitedCount) maxVisitedCount = v;
-    });
-    // Rebuild redirect chains from edge attributes
-    graph.forEachEdge(function (edge, attrs, source, target) {
-      if (attrs.edge_type === "redirect") {
-        redirectNext[source] = target;
-        if (!redirectPrev[target]) redirectPrev[target] = source;
-      }
     });
 
     buildISAPIndexes();
@@ -1432,15 +1472,15 @@
   var FA2_WORKER_BODY = [
     "var Graph = typeof graphology === 'function' ? graphology : graphology.Graph;",
     "var fa2 = graphologyLibrary.layoutForceAtlas2;",
-    "var graph = null, nodeKeys = [], running = false, settings = {}, iters = 5, settleThreshold = 0.5;",
+    "var graph = null, nodeKeys = [], running = false, settings = {}, iters = 5, settleThreshold = 0.5, gen = 0;",
     "var prevPos = null, tickCount = 0;",
     "self.onmessage = function(e) {",
     "  var m = e.data;",
     "  if (m.type === 'init') {",
-    "    graph = new Graph(); graph.import(m.graph);",
+    "    gen = m.gen; graph = new Graph(); graph.import(m.graph);",
     "    nodeKeys = []; graph.forEachNode(function(k) { nodeKeys.push(k); });",
     "    prevPos = null; tickCount = 0;",
-    "    self.postMessage({ type: 'ready', nodeCount: nodeKeys.length });",
+    "    self.postMessage({ type: 'ready', gen: gen, nodeCount: nodeKeys.length });",
     "  } else if (m.type === 'start') {",
     "    settings = m.settings || settings; iters = m.iters || iters; if (m.settleThreshold != null) settleThreshold = m.settleThreshold;",
     "    running = true; runLoop();",
@@ -1483,10 +1523,10 @@
     "  }",
     "  var avgDisp = nodeKeys.length > 0 ? totalDisp / nodeKeys.length : 0;",
     "  prevPos = new Float64Array(buf);",
-    "  self.postMessage({ type: 'positions', buffer: buf.buffer, avgDisp: avgDisp }, [buf.buffer]);",
+    "  self.postMessage({ type: 'positions', gen: gen, buffer: buf.buffer, avgDisp: avgDisp }, [buf.buffer]);",
     "  if (prevPos && tickCount > 20 && avgDisp < settleThreshold) {",
     "    running = false;",
-    "    self.postMessage({ type: 'idle' });",
+    "    self.postMessage({ type: 'idle', gen: gen });",
     "    return;",
     "  }",
     "  setTimeout(runLoop, 0);",
@@ -1499,7 +1539,8 @@
     graph.forEachNode(function (key, attrs) {
       if (!isNodeHidden(key)) {
         var vs = getVisualSize(key, attrs);
-        lg.addNode(key, { x: attrs.x, y: attrs.y, size: vs * 3 + 2 });
+        // domain drives the Multi-Focal pull in both the worker and the sync path
+        lg.addNode(key, { x: attrs.x, y: attrs.y, size: vs * 3 + 2, domain: attrs.domain });
       }
     });
     graph.forEachEdge(function (edge, attrs, source, target) {
@@ -1640,11 +1681,10 @@
     if (!fa2Worker) {
       if (!fa2WorkerPromise) fa2WorkerPromise = createFA2Worker();
       var pending = await fa2WorkerPromise;
-      if (myGen !== fa2Generation || !fa2Running) {
-        if (pending && pending !== fa2Worker) pending.terminate();
-        fa2WorkerPromise = null;
-        return;
-      }
+      // Lost the race: leave the worker in the promise for the start that won
+      // (it may be awaiting this same promise) or for killFA2Worker to dispose
+      // of. Terminating it here handed that later start a dead worker.
+      if (myGen !== fa2Generation || !fa2Running) return;
       fa2WorkerPromise = null;
       fa2Worker = pending;
     }
@@ -1658,9 +1698,13 @@
       fa2LayoutGraph.forEachNode(function (k) { fa2NodeKeys.push(k); });
 
       // Send filtered graph to worker
-      fa2Worker.postMessage({ type: "init", graph: fa2LayoutGraph.export() });
+      // Tag the run so a message the worker sent for an earlier init -- a
+      // ready still in flight when Stop ran, positions from a superseded run
+      // on this same reused worker -- can't act on this one.
+      fa2Worker.postMessage({ type: "init", gen: myGen, graph: fa2LayoutGraph.export() });
 
       fa2Worker.onmessage = function (e) {
+        if (e.data.gen !== fa2Generation) return;
         if (e.data.type === "ready") {
           fa2Worker.postMessage({ type: "start", settings: fa2Settings, iters: fa2Iters, settleThreshold: fa2SettleThreshold });
         } else if (e.data.type === "positions") {
@@ -1709,8 +1753,11 @@
   }
 
   function killFA2Worker() {
+    var promised = fa2WorkerPromise;
     fa2WorkerPromise = null;
     if (fa2Worker) { fa2Worker.terminate(); fa2Worker = null; }
+    // Still in flight, or parked by a start that lost its race: nobody will claim it now.
+    if (promised) promised.then(function (w) { if (w && w !== fa2Worker) w.terminate(); });
     if (fa2WorkerBlobUrl) { URL.revokeObjectURL(fa2WorkerBlobUrl); fa2WorkerBlobUrl = null; }
     fa2UseWorker = false;
   }
@@ -2059,10 +2106,10 @@
       var labels = Array.from(contentFiltersDiv.querySelectorAll("label"));
       labels.sort((a, b) => a.textContent.localeCompare(b.textContent));
       labels.forEach(lbl => contentFiltersDiv.appendChild(lbl));
-      if (contentSection) contentSection.style.display = "";
-    } else if (contentSection) {
-      contentSection.style.display = "none";
     }
+    // Visibility follows whether any filter exists, not whether this call added
+    // one: a live refresh with no new group used to hide the whole section.
+    if (contentSection) contentSection.style.display = renderedContentGroups.size > 0 ? "" : "none";
   }
 
   // ── Domain Filters ─────────────────────────────────────────────────
@@ -2436,8 +2483,8 @@
 
     var html = "";
     html += '<div class="info-row"><span class="attr-key">edge type</span><span class="attr-val">' + infoBadge(edgeType, theme.accentYellow) + '</span></div>';
-    html += '<div class="info-row"><span class="attr-key">source</span><span class="attr-val">' + infoClickable(sAttrs.label || source, sAttrs.node_type === "domain" ? "domain" : "node", source) + ' <span style="color:' + theme.textMuted + '">(' + (sAttrs.node_type || "") + ')</span></span></div>';
-    html += '<div class="info-row"><span class="attr-key">target</span><span class="attr-val">' + infoClickable(tAttrs.label || target, tAttrs.node_type === "domain" ? "domain" : "node", target) + ' <span style="color:' + theme.textMuted + '">(' + (tAttrs.node_type || "") + ')</span></span></div>';
+    html += '<div class="info-row"><span class="attr-key">source</span><span class="attr-val">' + infoClickable(sAttrs.label || source, sAttrs.node_type === "domain" ? "domain" : "node", source) + ' <span style="color:' + theme.textMuted + '">(' + escapeHtml(sAttrs.node_type || "") + ')</span></span></div>';
+    html += '<div class="info-row"><span class="attr-key">target</span><span class="attr-val">' + infoClickable(tAttrs.label || target, tAttrs.node_type === "domain" ? "domain" : "node", target) + ' <span style="color:' + theme.textMuted + '">(' + escapeHtml(tAttrs.node_type || "") + ')</span></span></div>';
 
     if (attrs.status_code) html += '<div class="info-row"><span class="attr-key">status</span><span class="attr-val">' + escapeHtml(String(attrs.status_code)) + '</span></div>';
     if (attrs.redirect_type) html += '<div class="info-row"><span class="attr-key">redirect type</span><span class="attr-val">' + escapeHtml(attrs.redirect_type) + '</span></div>';
@@ -2553,6 +2600,19 @@
     return '<span class="info-badge" style="background:' + color + '">' + escapeHtml(text) + '</span>';
   }
 
+  // One row per attribute the specialised branches did not already show.
+  function infoAttrRows(attrs, shown) {
+    var skip = new Set(["x", "y", "z", "size", "color", "viz", "hidden", "highlighted", "zIndex", "node_type"].concat(shown || []));
+    var html = "";
+    Object.keys(attrs).forEach(function (k) {
+      if (skip.has(k)) return;
+      if (attrs[k] == null || attrs[k] === "") return;
+      if (typeof attrs[k] === "object") return;
+      html += '<div class="info-row"><span class="attr-key">' + escapeHtml(k) + '</span><span class="attr-val">' + escapeHtml(String(attrs[k])) + '</span></div>';
+    });
+    return html;
+  }
+
   function showNodeInfo(nodeKey) {
     if (!graph || !graph.hasNode(nodeKey)) { infoPanel.classList.add("hidden"); return; }
     var infoTitle = document.getElementById("info-title");
@@ -2635,7 +2695,7 @@
             var edges = graph.edges(rid, chain[i + 1]);
             if (edges.length > 0) {
               var sc = graph.getEdgeAttribute(edges[0], "status_code");
-              if (sc) status = ' <span style="color:' + theme.accentYellow + '">[' + sc + ']</span>';
+              if (sc) status = ' <span style="color:' + theme.accentYellow + '">[' + escapeHtml(String(sc)) + ']</span>';
             }
           }
           return roleTag + label + status;
@@ -2646,6 +2706,9 @@
       // Temporal
       if (attrs.first_seen) html += '<div class="info-row"><span class="attr-key">first seen</span><span class="attr-val">' + escapeHtml(attrs.first_seen) + '</span></div>';
       if (attrs.last_seen) html += '<div class="info-row"><span class="attr-key">last seen</span><span class="attr-val">' + escapeHtml(attrs.last_seen) + '</span></div>';
+
+      // What the collector recorded: method, content type, bytes, timing, visits...
+      html += infoAttrRows(attrs, ["status_code", "node_role", "cloaking", "first_seen", "last_seen"]);
 
     } else if (nodeType === "operator") {
       if (attrs.technique_set) html += '<div class="info-row"><span class="attr-key">techniques</span><span class="attr-val">' + escapeHtml(attrs.technique_set) + '</span></div>';
@@ -2730,14 +2793,7 @@
       }
 
     } else {
-      // Generic fallback for other node types
-      var skip = new Set(["x", "y", "z", "size", "color", "viz", "hidden", "highlighted", "zIndex", "node_type"]);
-      Object.keys(attrs).forEach(function (k) {
-        if (skip.has(k)) return;
-        if (attrs[k] == null || attrs[k] === "") return;
-        if (typeof attrs[k] === "object") return;
-        html += '<div class="info-row"><span class="attr-key">' + escapeHtml(k) + '</span><span class="attr-val">' + escapeHtml(String(attrs[k])) + '</span></div>';
-      });
+      html += infoAttrRows(attrs);
     }
 
     // Connections (always shown)
@@ -3025,7 +3081,11 @@
     if (liveRefreshTimer) return;
     liveRefreshTimer = setTimeout(function () {
       liveRefreshTimer = null;
-      if (graphGrew) rebuildBundles();
+      // Every record adds or bumps an edge, and the projection follows edges,
+      // not node count: a redirect between two already-collapsed resources
+      // adds no node but must still surface as a bundle-to-bundle edge.
+      // ponytail: full rebuild per flush; make it incremental if big live graphs stutter
+      var bundlesChanged = rebuildBundles();
       updateStats();
       if (renderer) {
         setupSearch();
@@ -3034,8 +3094,10 @@
         setupDomainFilters();
         renderer.refresh();
       }
-      // Wake or restart FA2 when new visible nodes were added
-      if (graphGrew && (fa2Idle || fa2Running)) {
+      // Wake or restart FA2 when the visible node set changed: new nodes, or
+      // a bundle that formed or dissolved. The layout graph is a snapshot of
+      // that set, and positions for a dropped bundle would throw.
+      if ((graphGrew || bundlesChanged) && (fa2Idle || fa2Running)) {
         restartFA2IfRunning();
       }
       graphGrew = false;
@@ -3066,15 +3128,6 @@
         if (originalSizes[key] == null) originalSizes[key] = attrs.size || 3;
         var v = Number(attrs.visited) || 1;
         if (v > maxVisitedCount) maxVisitedCount = v;
-      });
-      // Rebuild redirect chains from edge attributes
-      redirectNext = {};
-      redirectPrev = {};
-      graph.forEachEdge(function (edge, attrs, source, target) {
-        if (attrs.edge_type === "redirect") {
-          redirectNext[source] = target;
-          if (!redirectPrev[target]) redirectPrev[target] = source;
-        }
       });
       buildISAPIndexes();
       initRenderer({ autoStartFA2: false });
