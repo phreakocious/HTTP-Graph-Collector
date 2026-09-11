@@ -77,7 +77,6 @@
   }
 
   var COLOR_LOCALDOMAIN = [0, 255, 204]; // Neon Mint
-  var COLOR_DEFAULT = [113, 10, 255]; // Electric Purple
   var MAXLABEL = 32;
 
   function LiveGraphBuilder(g) {
@@ -170,7 +169,7 @@
 
   LiveGraphBuilder.prototype.ensureHierarchy = function (url) {
     var parsed;
-    try { parsed = new URL(url); } catch (e) { return null; }
+    try { parsed = new URL(url); } catch (_e) { return null; }
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
     if (!parsed.hostname) return null;
     var host = parsed.hostname;
@@ -203,7 +202,7 @@
     var url = record.url;
     if (!url) return;
     var parsed;
-    try { parsed = new URL(url); } catch (e) { return; }
+    try { parsed = new URL(url); } catch (_e) { return; }
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
     if (!parsed.hostname) return;
 
@@ -247,7 +246,7 @@
           this.addEdge(ih, ir);
           this.addEdge(ir, resourceId);
         }
-      } catch (e) {}
+      } catch (_e) { /* unparseable initiator: skip the hop */ }
     }
 
     // Referer (only when no initiator)
@@ -262,7 +261,7 @@
           if (this.graph.hasNode(rr)) this.addEdge(rr, resourceId);
           else this.addEdge(rh, resourceId);
         }
-      } catch (e) {}
+      } catch (_e) { /* unparseable referer: skip the hop */ }
     }
   };
 
@@ -338,6 +337,7 @@
     sharedIPMap = {};
     sharedNSMap = {};
     sharesHostPairs = new Set();
+    if (!graph) return;
 
     graph.forEachNode(function (key, attrs) {
       if (attrs.node_role && attrs.node_role !== "") {
@@ -404,7 +404,7 @@
   }
 
   function buildInvestigationFocusSet() {
-    if (!activeOperator && !activeCluster) {
+    if (!graph || (!activeOperator && !activeCluster)) {
       investigationFocusSet = null;
       return;
     }
@@ -904,12 +904,16 @@
     searchSection.classList.add("hidden");
     focusSection.classList.add("hidden");
     filterSection.classList.add("hidden");
+    document.getElementById("investigation-section").classList.add("hidden");
+    infoPanel.classList.add("hidden");
+    resetGraphState();
+    buildISAPIndexes();
+    updateHiddenCount();
   });
 
-  function initRenderer(opts) {
-    opts = opts || {};
-    if (renderer) { renderer.kill(); renderer = null; }
-
+  // Per-graph UI state. Shared by initRenderer and the Clear button so the two
+  // can't drift apart -- Clear used to miss the investigation state entirely.
+  function resetGraphState() {
     hoveredNode = null;
     selectedNode = null;
     highlightMap = null;
@@ -935,6 +939,13 @@
     hiddenRoles = new Set();
     showInfrastructure = false;
     investigationFocusSet = null;
+    labelMap = {};
+  }
+
+  function initRenderer(opts) {
+    opts = opts || {};
+    if (renderer) { renderer.kill(); renderer = null; }
+    resetGraphState();
     rebuildBundles();
     updateHiddenCount();
 
@@ -1386,6 +1397,8 @@
 
   // ── ForceAtlas2 ────────────────────────────────────────────────────
   var fa2Worker = null;
+  var fa2WorkerPromise = null;   // in-flight createFA2Worker(), shared by concurrent starts
+  var fa2Generation = 0;         // bumped by every start/stop; stale awaits bail out
   var fa2WorkerBlobUrl = null;
   var fa2NodeKeys = null;   // ordered node keys for position mapping
   var fa2UseWorker = false; // whether web worker is available
@@ -1413,6 +1426,19 @@
   // CDN URLs (same as in index.html, fetched from cache for the worker)
   var CDN_GRAPHOLOGY = "https://unpkg.com/graphology@0.26.0/dist/graphology.umd.min.js";
   var CDN_LIBRARY = "https://cdn.jsdelivr.net/npm/graphology-library@0.8.0/dist/graphology-library.min.js";
+  // Same digests the <script> tags in index.html carry. The browser enforces
+  // those; nothing enforces a fetch(), and this text gets eval'd inside a
+  // worker — so check it here by hand. Keep both copies in step on a bump.
+  var CDN_GRAPHOLOGY_SRI = "sha384-YdXPUVLFDJ3oITK7LFAPRyzkOcDK06bb7KRaE8GiQyGLsrvHaLS9Ej/lELMC7aCE";
+  var CDN_LIBRARY_SRI = "sha384-JfW8ehTxF6vKpm17Oz+cpaluYzFMvm6YfXgwbw5Hxzrn0rR6WR+0DDDWPEIv9CtK";
+
+  async function fetchVerified(url, expected) {
+    var buf = await fetch(url).then(function (r) { return r.arrayBuffer(); });
+    var digest = await crypto.subtle.digest("SHA-384", buf);
+    var actual = "sha384-" + btoa(String.fromCharCode.apply(null, new Uint8Array(digest)));
+    if (actual !== expected) throw new Error("integrity mismatch for " + url);
+    return new TextDecoder().decode(buf);
+  }
 
   var FA2_WORKER_BODY = [
     "var Graph = typeof graphology === 'function' ? graphology : graphology.Graph;",
@@ -1506,8 +1532,8 @@
   async function createFA2Worker() {
     try {
       var codes = await Promise.all([
-        fetch(CDN_GRAPHOLOGY).then(function (r) { return r.text(); }),
-        fetch(CDN_LIBRARY).then(function (r) { return r.text(); })
+        fetchVerified(CDN_GRAPHOLOGY, CDN_GRAPHOLOGY_SRI),
+        fetchVerified(CDN_LIBRARY, CDN_LIBRARY_SRI)
       ]);
       // Stub DOM APIs — graphology-library's GEXF/GraphML parsers reference
       // these at init time but the worker never uses them
@@ -1601,6 +1627,7 @@
     if (fa2Running || !graph) return;
     if (!fa2Settings.scalingRatio) initFA2Settings();
     fa2Running = true;
+    var myGen = ++fa2Generation;
     btnFA2.textContent = "Stop ForceAtlas2";
     btnFA2.classList.add("active");
     fa2SettingsDiv.classList.remove("hidden");
@@ -1616,9 +1643,21 @@
       return;
     }
 
-    // Try web worker first
+    // Try web worker first. Two CDN fetches happen inside createFA2Worker(), so
+    // a Stop -- or a second start from restartFA2IfRunning() -- can land while
+    // this await is pending. Share one in-flight promise so concurrent starts
+    // can't each build a worker and orphan one, and re-check the generation
+    // afterwards so a start that lost the race doesn't run behind the UI.
     if (!fa2Worker) {
-      fa2Worker = await createFA2Worker();
+      if (!fa2WorkerPromise) fa2WorkerPromise = createFA2Worker();
+      var pending = await fa2WorkerPromise;
+      if (myGen !== fa2Generation || !fa2Running) {
+        if (pending && pending !== fa2Worker) pending.terminate();
+        fa2WorkerPromise = null;
+        return;
+      }
+      fa2WorkerPromise = null;
+      fa2Worker = pending;
     }
 
     if (fa2Worker) {
@@ -1667,6 +1706,7 @@
   function stopFA2() {
     var wasRunning = fa2Running;
     fa2Running = false;
+    fa2Generation++;
     fa2Idle = false;
     if (fa2Worker && fa2UseWorker) {
       fa2Worker.postMessage({ type: "stop" });
@@ -1680,6 +1720,7 @@
   }
 
   function killFA2Worker() {
+    fa2WorkerPromise = null;
     if (fa2Worker) { fa2Worker.terminate(); fa2Worker = null; }
     if (fa2WorkerBlobUrl) { URL.revokeObjectURL(fa2WorkerBlobUrl); fa2WorkerBlobUrl = null; }
     fa2UseWorker = false;
@@ -2099,8 +2140,6 @@
   function setupInvestigation() {
     var opSelect = document.getElementById("operator-select");
     var clSelect = document.getElementById("cluster-select");
-    var colorSelect = document.getElementById("color-select");
-    var infraToggle = document.getElementById("infra-toggle");
     var roleFiltersDiv = document.getElementById("role-filters");
     var investigationSection = document.getElementById("investigation-section");
 
@@ -2209,7 +2248,19 @@
       });
     });
 
-    // Operator select
+  }
+
+  // Bound once, not per graph load. These four live in index.html and are
+  // never rebuilt, unlike the role checkboxes above -- registering them from
+  // setupInvestigation() stacked a duplicate handler on every GEXF loaded.
+  (function bindInvestigationControls() {
+    var opSelect = document.getElementById("operator-select");
+    var clSelect = document.getElementById("cluster-select");
+    var colorSelect = document.getElementById("color-select");
+    var infraToggle = document.getElementById("infra-toggle");
+    if (!opSelect || !clSelect || !colorSelect || !infraToggle) return;
+
+      // Operator select
     opSelect.addEventListener("change", function () {
       activeOperator = opSelect.value || null;
       activeCluster = null;
@@ -2266,7 +2317,7 @@
       if (renderer) renderer.refresh();
       restartFA2IfRunning();
     });
-  }
+  })();
 
   // ── Reset ──────────────────────────────────────────────────────────
   btnReset.addEventListener("click", function () {
@@ -2384,6 +2435,7 @@
   }
 
   function showEdgeInfo(edgeKey) {
+    if (!graph || !graph.hasEdge(edgeKey)) { infoPanel.classList.add("hidden"); return; }
     var infoTitle = document.getElementById("info-title");
     if (infoTitle) infoTitle.textContent = "Edge Info";
     var attrs = graph.getEdgeAttributes(edgeKey);
@@ -2501,7 +2553,7 @@
   }
 
   function infoClickable(label, type, value) {
-    return '<span class="info-link" data-type="' + type + '" data-value="' + escapeHtml(value) + '">' + escapeHtml(label) + '</span>';
+    return '<span class="info-link" data-type="' + escapeHtml(type) + '" data-value="' + escapeHtml(value) + '">' + escapeHtml(label) + '</span>';
   }
 
   function infoSection(title) {
@@ -2513,6 +2565,7 @@
   }
 
   function showNodeInfo(nodeKey) {
+    if (!graph || !graph.hasNode(nodeKey)) { infoPanel.classList.add("hidden"); return; }
     var infoTitle = document.getElementById("info-title");
     if (infoTitle) infoTitle.textContent = "Node Info";
     var attrs = graph.getNodeAttributes(nodeKey);
@@ -2889,6 +2942,10 @@
       graph = new Graph();
       originalSizes = {};
     }
+    // Reindex against whatever graph we're actually about to stream into.
+    // Without this, Clear -> Connect left the investigation panel and the
+    // domain colouring driven by the previous graph's indexes.
+    buildISAPIndexes();
     liveBuilder = new LiveGraphBuilder(graph);
     liveMode = true;
 
@@ -2911,7 +2968,7 @@
           var rid = p.hostname + p.pathname;
           if (graph.hasNode(rid) && !isNodeHidden(rid, graph.getNodeAttributes(rid)))
             graphGrew = true;
-        } catch (e) {}
+        } catch (_e) { /* unparseable url: just don't count it as growth */ }
       }
       scheduleLiveRefresh();
     });
@@ -2954,7 +3011,7 @@
     keepAliveTimer = setInterval(function () {
       if (livePort) {
         try { livePort.postMessage({ type: "ping" }); }
-        catch (e) { /* onDisconnect will handle it */ }
+        catch (_e) { /* onDisconnect will handle it */ }
       }
     }, 25000);
   }
@@ -3097,9 +3154,12 @@
   })();
 
   // ── Util ───────────────────────────────────────────────────────────
+  // Escapes for BOTH text and double-quoted attribute contexts. The old
+  // createTextNode/innerHTML round-trip escaped & < > but left " alone, so a
+  // node key containing a quote broke out of data-value= in infoClickable().
   function escapeHtml(str) {
-    var div = document.createElement("div");
-    div.appendChild(document.createTextNode(str));
-    return div.innerHTML;
+    return String(str).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
   }
 })();
