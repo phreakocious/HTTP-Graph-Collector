@@ -13,3 +13,5 @@ node_modules/
 .venv/
 gephi-plugins
 __pycache__/
+REVIEW-*.md
+NEXT_SESSION.md
