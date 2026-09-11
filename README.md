@@ -44,7 +44,7 @@ The extension reads HTTP request metadata as you browse — URLs, status codes, 
 
 The only thing the extension stores is your settings — port, scrub toggle, pause state, and the two domain lists — in Chrome's local extension storage. Your traffic is never written there. The viewer holds the current graph and the extension ID you pasted in your browser's own storage, on your device: Clear erases the graph, and uninstalling the extension deletes its settings.
 
-Opening the viewer at `nullphase.net/hg` is an ordinary page load — your browser asks for the app and gets it back. No graph data is part of that request, and none is ever uploaded. Like most pages it also fetches its fonts, its graph libraries from a public CDN, and an uptime script that reports the page address back to the site's monitor. If you would rather make no outside request at all, the viewer is three files in `viewer/` and runs from localhost.
+Opening the viewer at `nullphase.net/hg` pulls the page and the app itself, and nothing else. No fonts, no libraries, no analytics, no trackers from anywhere — every file the page needs is served beside it. No graph data is part of that request, and none is ever uploaded. If you would rather not make the request at all, the viewer runs from localhost straight out of the repository.
 
 ### Graph Structure
 

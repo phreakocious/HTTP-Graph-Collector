@@ -3,6 +3,8 @@ import globals from "globals";
 import security from "eslint-plugin-security";
 
 export default [
+  // Vendored third-party bundles: not ours to lint.
+  { ignores: ["viewer/vendor/**"] },
   js.configs.recommended,
   security.configs.recommended,
   {

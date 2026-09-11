@@ -1423,22 +1423,11 @@
   var fa2ASCheck = document.getElementById("fa2-adjustsizes");
   var fa2ModeLabel = document.getElementById("fa2-mode");
 
-  // CDN URLs (same as in index.html, fetched from cache for the worker)
-  var CDN_GRAPHOLOGY = "https://unpkg.com/graphology@0.26.0/dist/graphology.umd.min.js";
-  var CDN_LIBRARY = "https://cdn.jsdelivr.net/npm/graphology-library@0.8.0/dist/graphology-library.min.js";
-  // Same digests the <script> tags in index.html carry. The browser enforces
-  // those; nothing enforces a fetch(), and this text gets eval'd inside a
-  // worker — so check it here by hand. Keep both copies in step on a bump.
-  var CDN_GRAPHOLOGY_SRI = "sha384-YdXPUVLFDJ3oITK7LFAPRyzkOcDK06bb7KRaE8GiQyGLsrvHaLS9Ej/lELMC7aCE";
-  var CDN_LIBRARY_SRI = "sha384-JfW8ehTxF6vKpm17Oz+cpaluYzFMvm6YfXgwbw5Hxzrn0rR6WR+0DDDWPEIv9CtK";
-
-  async function fetchVerified(url, expected) {
-    var buf = await fetch(url).then(function (r) { return r.arrayBuffer(); });
-    var digest = await crypto.subtle.digest("SHA-384", buf);
-    var actual = "sha384-" + btoa(String.fromCharCode.apply(null, new Uint8Array(digest)));
-    if (actual !== expected) throw new Error("integrity mismatch for " + url);
-    return new TextDecoder().decode(buf);
-  }
+  // Same files index.html loads, vendored alongside it. The worker needs them
+  // as text to inline into its blob. Same-origin, so nothing to verify:
+  // anyone who can edit these can edit app.js too.
+  var LIB_GRAPHOLOGY = "vendor/graphology.umd.min.js";
+  var LIB_GRAPHOLOGY_LIBRARY = "vendor/graphology-library.min.js";
 
   var FA2_WORKER_BODY = [
     "var Graph = typeof graphology === 'function' ? graphology : graphology.Graph;",
@@ -1532,8 +1521,8 @@
   async function createFA2Worker() {
     try {
       var codes = await Promise.all([
-        fetchVerified(CDN_GRAPHOLOGY, CDN_GRAPHOLOGY_SRI),
-        fetchVerified(CDN_LIBRARY, CDN_LIBRARY_SRI)
+        fetch(LIB_GRAPHOLOGY).then(function (r) { return r.text(); }),
+        fetch(LIB_GRAPHOLOGY_LIBRARY).then(function (r) { return r.text(); })
       ]);
       // Stub DOM APIs — graphology-library's GEXF/GraphML parsers reference
       // these at init time but the worker never uses them
