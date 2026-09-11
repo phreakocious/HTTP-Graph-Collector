@@ -4,7 +4,7 @@
 
 ### Live Viewer
 
-Open the graph viewer at [nullphase.net/hg](https://nullphase.net/hg), paste your extension ID (click it in the popup to copy), and hit Connect. Every HTTP request you make instantly appears as a node in the graph. Domains are automatically colored, and the force-directed layout organizes the structure as it grows. All data stays local to your browser — the viewer page talks directly to the extension through Chrome's messaging API. Nothing is sent over the network.
+Click **Open Viewer** in the extension popup. It opens [nullphase.net/hg](https://nullphase.net/hg) with your extension ID already handed over, so all that is left is Connect — tick Auto-connect and even that goes away. Opening the viewer on its own still works: click the ID in the popup to copy it, and paste it in. Every HTTP request you make instantly appears as a node in the graph. Domains are automatically colored, and the force-directed layout organizes the structure as it grows. All data stays local to your browser — the viewer page talks directly to the extension through Chrome's messaging API. Nothing is sent over the network.
 
 Install the extension from the [Chrome Web Store](https://chromewebstore.google.com/detail/http-graph-collector/lkkdeokncfjlinldgikoabgknklnnkoe).
 
@@ -42,7 +42,7 @@ The extension also POSTs JSON request records to a configurable localhost REST A
 
 The extension reads HTTP request metadata as you browse — URLs, status codes, content types, timing — and that is what the graph is built from. It goes to two places, both of them yours: the viewer tab, over Chrome's extension messaging API, which never crosses the network; and `127.0.0.1` if you are running the included Python collector. No remote server, no analytics in the extension, no account. Broad host permissions are needed to see requests across all sites, but nothing is collected while collection is paused, and the domain lists narrow what is collected at all.
 
-The only thing the extension stores is your settings — port, scrub toggle, pause state, and the two domain lists — in Chrome's local extension storage. Your traffic is never written there. The viewer holds the current graph and the extension ID you pasted in your browser's own storage, on your device: Clear erases the graph, and uninstalling the extension deletes its settings.
+The only thing the extension stores is your settings — port, scrub toggle, pause state, and the two domain lists — in Chrome's local extension storage. Your traffic is never written there. The viewer holds the current graph and your extension ID in the browser's own storage, on your device: Clear erases the graph, and uninstalling the extension deletes its settings.
 
 Opening the viewer at `nullphase.net/hg` pulls the page and the app itself, and nothing else. No fonts, no libraries, no analytics, no trackers from anywhere — every file the page needs is served beside it. No graph data is part of that request, and none is ever uploaded. If you would rather not make the request at all, the viewer runs from localhost straight out of the repository.
 
