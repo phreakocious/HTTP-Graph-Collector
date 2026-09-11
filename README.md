@@ -29,7 +29,7 @@ Already have a GEXF file? Load it directly into the viewer without the extension
 
 The extension also POSTs JSON request records to a configurable localhost REST API (default port 65444). Run [httpgraph-logger.py](httpgraph-logger.py) to collect them and [httpgraph-builder.py](httpgraph-builder.py) to turn the log into a GEXF file — no Gephi required, and the viewer above will open the result. The same records are accepted by the original [HTTP Graph](https://github.com/phreakocious/gephi-plugins/tree/master/modules/HttpGraph) plugin if you do want Gephi. Nothing listening? The extension backs off after a few failed attempts and keeps probing, so leaving the port unused costs nothing.
 
-![sample of httpgraph-logger.py output](https://github.com/phreakocious/HTTP-Graph-Collector/blob/master/httpgraph-logger_screenshot.png?raw=true)
+![sample of httpgraph-logger.py output](https://github.com/phreakocious/HTTP-Graph-Collector/blob/main/httpgraph-logger_screenshot.png?raw=true)
 
 ### Collection Controls
 

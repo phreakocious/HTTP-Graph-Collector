@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master, manifest_v3]
+    branches: [main, manifest_v3]
   pull_request:
-    branches: [master, manifest_v3]
+    branches: [main, manifest_v3]
 
 jobs:
   check:
